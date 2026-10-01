@@ -9,8 +9,14 @@ Method sources
   and y = dV (mV). With a single record Rin = V / I.
 - Mono-exponential f(x) = b0 + b1*exp(-x/tau), x = t - t[0], fitted with scipy
   least_squares (Trust Region Reflective), tau > 0 (manual, Curve Fitting + Appendix I).
-- Cm = tau / Rin, as specified by the user (ref given by the user: PMC2775376).
-  This is NOT in the Easy Electrophysiology manual.
+- Multi-exponential (manual Appendix I): b0 + sum_k b_k exp(-x/tau_k); starting taus 0.1tau,
+  0.9tau (bi). Triexponential here uses 0.1/0.5/1.5 tau instead of the manual's identical tau/3
+  (identical start values make the Jacobian degenerate).
+- Cm (Golowasch et al. 2009, J Neurophysiol 102:2161, the paper supplied by the user):
+  Vm(t) = Vrest + sum_i V_i (1 - exp(-t/tau_i)), t = 0 at step onset, fitted to steady state.
+  For an isopotential cell (one exponential) Cm = tau_m / Rin. For a non-isopotential cell the
+  slowest term is tau_m = tau_0 and the correct resistance is R_0 = V_0 / I_ext (amplitude of the
+  slowest term), NOT Rin: Cm = tau_0 / R_0. Both are reported.
 """
 from dataclasses import dataclass, field, replace
 from typing import List, Optional, Tuple
@@ -40,6 +46,7 @@ class Params:
     fit_start_custom: float = 100.0  # ms ('custom' mode)
     sag_search: float = 200.0        # ms after step start searched for the sag peak
     fit_end: float = 1000.0          # ms
+    n_exp: int = 1                   # number of exponential terms (1-3)
     b0_mode: str = "free"            # 'free' | 'fixed' (b0 = steady-state estimate)
     tau_agg: str = "median"          # 'median' | 'mean' across sweeps
 
@@ -103,49 +110,65 @@ def default_params(t, i) -> Params:
 @dataclass
 class FitResult:
     ok: bool
-    tau: float = np.nan          # ms
+    tau: float = np.nan          # ms; slowest time constant (tau_0 of the paper)
     b0: float = np.nan
-    b1: float = np.nan
+    b1: float = np.nan           # amplitude of the slowest term
     r2: float = np.nan
     t: np.ndarray = field(default_factory=lambda: np.empty(0))
     y_fit: np.ndarray = field(default_factory=lambda: np.empty(0))
+    taus: tuple = ()             # all taus, slowest first
+    amps: tuple = ()             # matching amplitudes b_k (Vm = b0 + sum b_k exp(-x/tau_k))
     msg: str = ""
 
 
-def fit_mono(t, y, fixed_b0: Optional[float] = None) -> FitResult:
-    """b0 + b1*exp(-(t-t0)/tau). Start values follow the manual's recipe (tau from the
-    time to half amplitude / ln2) with b0 taken from the end of the window."""
+def fit_exp(t, y, n_exp: int = 1, fixed_b0: Optional[float] = None) -> FitResult:
+    """b0 + sum_k b_k*exp(-(t-t0)/tau_k), k = 1..n_exp (1-3), scipy least_squares (TRF),
+    tau > 0. Start values: b0 from the end of the window, tau from time-to-half-amplitude / ln2."""
     t = np.asarray(t, float)
     y = np.asarray(y, float)
-    if len(t) < 5:
+    n = int(n_exp)
+    if len(t) < 3 * n + 2:
         return FitResult(False, msg="too few samples")
     x = t - t[0]
     n_end = max(1, len(y) // 10)
     b0s = float(np.mean(y[-n_end:])) if fixed_b0 is None else fixed_b0
-    b1s = float(y[0] - b0s)
-    half = b0s + 0.5 * b1s
-    cross = np.where((y - half) * np.sign(b1s if b1s else 1) <= 0)[0]
+    d0 = float(y[0] - b0s)
+    half = b0s + 0.5 * d0
+    cross = np.where((y - half) * np.sign(d0 if d0 else 1) <= 0)[0]
     thalf = x[cross[0]] if len(cross) else x[-1] / 5.0
     tau0 = max(thalf / np.log(2), 1e-3 * x[-1], 1e-3)
+    mult = {1: [1.0], 2: [0.1, 0.9], 3: [0.1, 0.5, 1.5]}[n]
+    free0 = fixed_b0 is None
+    p0 = ([b0s] if free0 else []) + [d0 / n] * n + [tau0 * m for m in mult]
+    lo = ([-np.inf] if free0 else []) + [-np.inf] * n + [1e-6] * n
+    hi = [np.inf] * len(p0)
+
+    def unpack(q):
+        b0 = q[0] if free0 else fixed_b0
+        q = q[1:] if free0 else q
+        return b0, q[:n], q[n:]
+
+    def model(q):
+        b0, amps, taus = unpack(q)
+        return b0 + sum(a * np.exp(-x / tk) for a, tk in zip(amps, taus))
+
     try:
-        if fixed_b0 is None:
-            fun = lambda p: p[0] + p[1] * np.exp(-x / p[2]) - y
-            r = least_squares(fun, [b0s, b1s, tau0],
-                              bounds=([-np.inf, -np.inf, 1e-6], [np.inf, np.inf, np.inf]),
-                              method="trf")
-            b0, b1, tau = r.x
-        else:
-            fun = lambda p: fixed_b0 + p[0] * np.exp(-x / p[1]) - y
-            r = least_squares(fun, [b1s, tau0],
-                              bounds=([-np.inf, 1e-6], [np.inf, np.inf]), method="trf")
-            b0, (b1, tau) = fixed_b0, r.x
+        r = least_squares(lambda q: model(q) - y, p0, bounds=(lo, hi), method="trf")
     except Exception as e:  # pragma: no cover
         return FitResult(False, msg=str(e))
-    yf = b0 + b1 * np.exp(-x / tau)
+    b0, amps, taus = unpack(r.x)
+    order = np.argsort(taus)[::-1]
+    taus, amps = taus[order], amps[order]
+    yf = model(r.x)
     ss_res = float(np.sum((y - yf) ** 2))
     ss_tot = float(np.sum((y - y.mean()) ** 2))
     r2 = 1 - ss_res / ss_tot if ss_tot > 0 else np.nan
-    return FitResult(bool(r.success), float(tau), float(b0), float(b1), r2, t, yf)
+    return FitResult(bool(r.success), float(taus[0]), float(b0), float(amps[0]), r2, t, yf,
+                     tuple(map(float, taus)), tuple(map(float, amps)))
+
+
+def fit_mono(t, y, fixed_b0: Optional[float] = None) -> FitResult:
+    return fit_exp(t, y, 1, fixed_b0)
 
 
 def sag_metrics(t, v, v_base, v_ss, step_start, search_ms):
@@ -177,6 +200,7 @@ class SweepResult:
     sag: float = np.nan
     sag_ratio: float = np.nan
     fit: Optional[FitResult] = None
+    r0: float = np.nan          # MOhm; V_0 / I_ext of the slowest term (paper)
     fit_window: Tuple[float, float] = (np.nan, np.nan)
 
 
@@ -190,7 +214,9 @@ class Summary:
     tau: float = np.nan         # ms
     tau_sd: float = np.nan
     n_tau: int = 0
-    cm: float = np.nan          # pF
+    cm: float = np.nan          # pF; tau_slow / Rin (isopotential assumption)
+    r0: float = np.nan          # MOhm; aggregate of per-sweep R0
+    cm_r0: float = np.nan       # pF; tau_0 / R0 (Golowasch 2009, non-isopotential)
 
 
 def capacitance_pF(tau_ms: float, rin_mohm: float) -> float:
@@ -223,6 +249,9 @@ def analyze(rec, p: Params, sweeps: List[int]):
                 t, v, r.v_base, r.v_ss, p.step[0], p.sag_search)
         if r.used:
             r.fit, r.fit_window = _fit_sweep(t, v, r, p)
+            if r.fit and r.fit.ok and r.dI:
+                # Vm = Vrest + sum V_i(1 - e^-t/tau_i)  <=>  b_i = -V_i
+                r.r0 = (-r.fit.b1) / (r.dI / 1e3)
         results.append(r)
     return results, summarize(results, p)
 
@@ -237,7 +266,7 @@ def _fit_sweep(t, v, r: SweepResult, p: Params):
     t1 = p.fit_end
     m = (t >= t0) & (t <= t1)
     fixed = r.v_ss if p.b0_mode == "fixed" else None
-    return fit_mono(t[m], v[m], fixed), (t0, t1)
+    return fit_exp(t[m], v[m], p.n_exp, fixed), (t0, t1)
 
 
 def summarize(results: List[SweepResult], p: Params) -> Summary:
@@ -257,4 +286,9 @@ def summarize(results: List[SweepResult], p: Params) -> Summary:
         S.tau = float(np.median(taus) if p.tau_agg == "median" else np.mean(taus))
         S.tau_sd = float(np.std(taus, ddof=1)) if len(taus) > 1 else np.nan
     S.cm = capacitance_pF(S.tau, S.rin)
+    ok = [r for r in used if r.fit and r.fit.ok and np.isfinite(r.r0) and r.r0 > 0]
+    if ok:
+        agg = np.median if p.tau_agg == "median" else np.mean
+        S.r0 = float(agg([r.r0 for r in ok]))
+        S.cm_r0 = float(agg([capacitance_pF(r.fit.tau, r.r0) for r in ok]))
     return S

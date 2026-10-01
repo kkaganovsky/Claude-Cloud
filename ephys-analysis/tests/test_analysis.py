@@ -91,3 +91,24 @@ def test_fit_mono_exact():
 
 def test_capacitance_units():
     assert capacitance_pF(20, 200) == pytest.approx(100)
+
+
+def test_biexp_r0_recovers_cm_of_two_compartment_response():
+    # Vm = Vrest + V0(1-e^-t/tau0) + V1(1-e^-t/tau1), tau0 = 100 ms, V0 = -8 mV, I = -100 pA
+    # => R0 = 80 MOhm, Cm = tau0/R0 = 1250 pF; Rin = (8+4)/0.1 = 120 MOhm, tau0/Rin = 833 pF
+    t = np.arange(0, 1500, 0.1)
+    on = t >= 200
+    x = np.where(on, t - 200, 0)
+    vm = -65 + on * (-8 * (1 - np.exp(-x / 100)) - 4 * (1 - np.exp(-x / 10)))
+    vm = np.where(t < 1200, vm, -65.0)
+    cur = np.where((t >= 200) & (t < 1200), -100.0, 0.0)
+    v2 = np.vstack([vm, 0.5 * (vm + 65) - 65])      # second sweep: -50 pA
+    c2 = np.vstack([cur, 0.5 * cur])
+    rec = Recording("syn2", t, v2, c2, "syn", [])
+    p = default_params(t, c2)
+    p.n_exp = 2
+    res, S = analyze(rec, p, [0, 1])
+    assert S.tau == pytest.approx(100, rel=0.02)
+    assert S.r0 == pytest.approx(80, rel=0.02)
+    assert S.cm_r0 == pytest.approx(1250, rel=0.03)
+    assert S.cm == pytest.approx(833, rel=0.03)

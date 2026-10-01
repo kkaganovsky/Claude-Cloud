@@ -25,21 +25,24 @@ with its equation. One sweep → V/I. Sweeps with spikes are excluded by default
 **Steady-state estimator** (for large sag): mean, median, last sample(s), or an OLS line fitted
 over the measure region and evaluated at its end.
 
-**τ**: per sweep, `b0 + b1·exp(−t/τ)` (scipy `least_squares`, TRF, τ > 0), fit start = step onset
-(+offset), the sag minimum, or a custom time; fit end editable; b0 free or fixed to the steady-state
-estimate. τ is the median (or mean) across analysed sweeps. Sag peak, sag and sag ratio
-(sag / baseline-to-peak deflection) are tabulated.
+**τ0**: per sweep, `b0 + Σ b_k·exp(−t/τ_k)` with 1 (default), 2 or 3 terms (scipy `least_squares`,
+TRF, τ > 0); τ0 is the slowest term. Fit start = step onset (+offset), the sag minimum, or a custom
+time; fit end editable; b0 free or fixed to the steady-state estimate. τ0 is the median (or mean)
+across analysed sweeps. Sag peak, sag and sag ratio (sag / baseline-to-peak deflection) are tabulated.
 
-**Cm = τ / Rin** (ms / MΩ = nF, reported in pF), as specified by the project owner, citing
-PMC2775376. That paper could not be opened from the build environment (blocked by the network
-proxy) and this formula is not in the Easy Electrophysiology manual, so it is unverified against
-the paper.
+**Cm = τ0 / Rin** (ms / MΩ = nF, reported in pF). This is the headline value and matches how the rest
+of the project's data were analysed.
+
+Reference only: Golowasch et al. 2009 (J Neurophysiol 102:2161, in the repo root) show that for
+non-isopotential cells τ/Rin is not correct and recommend a 2–3 exponential fit with Cm = τ0/R0,
+R0 = V0/Iext (amplitude of the slowest term). With >1 exponential terms the GUI also prints this
+as a muted reference line; it never replaces the headline Cm.
 
 ## Known limitations
-- Developed without access to the target recording (`slice 3/cell 2 DLX+/IO.abf`); verified with
-  synthetic passive-membrane data (`tests/`) and one public ABF for loading only.
+- Verified on synthetic passive-membrane data (`tests/`) and loaded/analysed on
+  `cell 7 DLX kglu next to DLX cells FS?/IO.abf` (step auto-detected at 578-1578 ms).
 - Step auto-detection assumes one step per sweep; with multi-epoch protocols set times manually.
-- Exponential start values use my own estimates (b0 from the end of the window), not the manual's
-  exact recipe; mono-exponential only.
+- Exponential start values use my own estimates (b0 from the end of the window); the triexponential
+  start taus differ from the manual's identical tau/3 (degenerate Jacobian).
 - A single τ fit is a poor model of a cell with strong sag or multiple compartments; check the
   displayed fits and R² per sweep.

@@ -131,6 +131,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sp_fcus = dspin(suffix=" ms", step=5)
         self.sp_sag = dspin(1, 1e5, 1, " ms")
         self.sp_fend = dspin(suffix=" ms", step=5)
+        self.cb_nexp = QtWidgets.QComboBox()
+        self.cb_nexp.addItems(["1", "2", "3"])
+        self.cb_nexp.setToolTip("Exponential terms. τ reported = slowest term (τ0). 1 = default.")
         self.cb_b0 = QtWidgets.QComboBox()
         self.cb_b0.addItems(["free", "fixed"])
         self.cb_b0.setToolTip("free: b0 fitted\nfixed: b0 = steady-state estimate chosen above")
@@ -141,6 +144,7 @@ class MainWindow(QtWidgets.QMainWindow):
         f.addRow("  custom start", self.sp_fcus)
         f.addRow("  sag search window", self.sp_sag)
         f.addRow("Fit end", self.sp_fend)
+        f.addRow("Exponential terms", self.cb_nexp)
         f.addRow("b0", self.cb_b0)
         f.addRow("τ across sweeps", self.cb_agg)
         lay.addWidget(g)
@@ -154,7 +158,7 @@ class MainWindow(QtWidgets.QMainWindow):
         for w in (self.sp_lastn, self.sp_spk, self.sp_foff, self.sp_fcus, self.sp_sag, self.sp_fend,
                   *self.sp.values()):
             w.valueChanged.connect(self._on_controls)
-        for w in (self.cb_est, self.cb_fstart, self.cb_b0, self.cb_agg):
+        for w in (self.cb_est, self.cb_fstart, self.cb_nexp, self.cb_b0, self.cb_agg):
             w.currentIndexChanged.connect(self._on_controls)
         for w in (self.chk_neg, self.chk_spk):
             w.toggled.connect(self._on_controls)
@@ -293,6 +297,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sp_fcus.setValue(p.fit_start_custom)
         self.sp_sag.setValue(p.sag_search)
         self.sp_fend.setValue(p.fit_end)
+        self.cb_nexp.setCurrentText(str(p.n_exp))
         self.cb_b0.setCurrentText(p.b0_mode)
         self.cb_agg.setCurrentText(p.tau_agg)
         self._busy = False
@@ -313,6 +318,7 @@ class MainWindow(QtWidgets.QMainWindow):
         p.fit_start_custom = self.sp_fcus.value()
         p.sag_search = self.sp_sag.value()
         p.fit_end = self.sp_fend.value()
+        p.n_exp = int(self.cb_nexp.currentText())
         p.b0_mode = self.cb_b0.currentText()
         p.tau_agg = self.cb_agg.currentText()
 
@@ -442,12 +448,14 @@ class MainWindow(QtWidgets.QMainWindow):
     def _update_table(self):
         S = self.summary
         agg = self.p.tau_agg
+        ref = ""
+        if self.p.n_exp > 1 and np.isfinite(S.cm_r0):
+            ref = (f"<br><span style='color:#777'>Reference only (Golowasch 2009, non-isopotential): "
+                   f"R0 = {S.r0:.1f} MΩ, Cm = τ0/R0 = {S.cm_r0:.1f} pF</span>")
         self.lbl_sum.setText(
             f"<b>Rin</b> = {S.rin:.2f} MΩ (n={S.n}, slope SE {S.stderr:.2f}, R²={S.r ** 2:.4f})<br>"
-            f"<b>τ</b> ({agg}, n={S.n_tau}) = {S.tau:.2f} ms (SD {S.tau_sd:.2f})<br>"
-            f"<b>Cm = τ / Rin</b> = {S.cm:.1f} pF"
-            "<br><span style='color:#777'>Cm = τ/Rin as specified by the user "
-            "(PMC2775376); not from the Easy Electrophysiology manual.</span>")
+            f"<b>τ0</b> ({agg}, n={S.n_tau}, {self.p.n_exp} exp) = {S.tau:.2f} ms (SD {S.tau_sd:.2f})<br>"
+            f"<b>Cm = τ0 / Rin</b> = {S.cm:.1f} pF" + ref)
         self.table.setRowCount(len(self.results))
         for row, r in enumerate(self.results):
             f = r.fit
