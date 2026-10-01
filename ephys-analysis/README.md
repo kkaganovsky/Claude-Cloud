@@ -27,7 +27,7 @@ over the measure region and evaluated at its end.
 
 **τ0**: per sweep, `b0 + Σ b_k·exp(−t/τ_k)` with 1 (default), 2 or 3 terms (scipy `least_squares`,
 TRF, τ > 0); τ0 is the slowest term. Fit start = step onset (+offset), the sag minimum, or a custom
-time; fit end editable; b0 free or fixed to the steady-state estimate. By default τ0 is taken from
+time; fit end editable (default: halfway through the step); b0 free or fixed to the steady-state estimate. By default τ0 is taken from
 only the **smallest hyperpolarizing sweep** (the one just before injected current = 0; "τ taken
 from: smallest"); Rin still uses all analysed sweeps. "all" uses the median (or mean) τ0 across
 analysed hyperpolarizing sweeps. Sag peak, sag and sag ratio (sag / baseline-to-peak deflection) are tabulated.
