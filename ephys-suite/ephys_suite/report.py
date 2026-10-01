@@ -54,10 +54,17 @@ def detect_step(t, I):
 
 
 def estimate_step(dI) -> float:
-    """Protocol step (pA) from the measured step currents: median spacing of the sorted values, to the nearest 5 pA."""
+    """Protocol step (pA) from the measured step currents: median spacing of the sorted values, to the nearest 5 pA.
+    Returns 0 (= do not round) when the spacing is not uniform (within 20 %), because one step size cannot describe an
+    uneven protocol; the measured currents are then used as they are."""
     d = np.diff(np.sort(np.asarray(dI, float)))
     d = d[d > 1.0]
-    return float(5 * round(np.median(d) / 5)) if d.size else 0.0
+    if not d.size:
+        return 0.0
+    med = float(np.median(d))
+    if (d.max() - d.min()) > 0.2 * med:
+        return 0.0
+    return float(5 * round(med / 5))
 
 
 def make_config(rec: Recording, **overrides) -> CellConfig:
@@ -99,9 +106,12 @@ def build_cell_report(path: str, cfg: Optional[CellConfig] = None, spont_path: O
     pp = cfg.passive
     dec += [
         ("Passive windows", f"baseline {base[0]:.1f}-{base[1]:.1f} ms; steady state {meas[0]:.1f}-{meas[1]:.1f} ms (mean)"),
+        ("Step ordering", "steps are ordered by their injected current relative to zero (not by file position): 'lowest' = most "
+                          "negative, 'smallest' = the last hyperpolarising step before zero, rheobase / latency / kinetics use the "
+                          "smallest depolarising step with an AP"),
         ("Steps used for Rin", f"{pas.rin_n} hyperpolarising steps (dI < -{pp.min_abs_dI} pA, spiking steps "
                                f"{'excluded' if pp.exclude_spikes else 'kept'}); dI measured from the Im channel"
-                               + (f", rounded to {pp.round_step} pA" if pp.round_step else "")),
+                               + (f", rounded to the {pp.round_step:.0f} pA protocol step" if pp.round_step else ", not rounded (uneven or unknown step size)")),
         ("Rin method", {"ols": "OLS line of dV on dI (EE manual s.9)", "ransac": "RANSAC line (Scala 2019)",
                         "median_ratio": "median of per-step dV/dI (Scala patch-seq)"}[pp.ri_method]),
         ("Sag / ratios", f"from the lowest step (dI={low.dI:.0f} pA): peak = "
@@ -128,7 +138,8 @@ def build_cell_report(path: str, cfg: Optional[CellConfig] = None, spont_path: O
     # per-sweep dI over the step (relative to baseline) for all sweeps
     dI_all = np.array([window_mean(t, I[s], *meas) - window_mean(t, I[s], *base) for s in range(V.shape[0])])
     # latency
-    first = next((s for s in range(len(per)) if per[s] and dI_all[s] > 0), None)
+    order = S.order_from_zero(dI_all)                    # depolarising steps, smallest current first
+    first = next((s for s in order if per[s]), None)
     thr_times = None
     origin = cfg.latency_origin if cfg.latency_origin is not None else a
     if first is not None:
@@ -136,7 +147,7 @@ def build_cell_report(path: str, cfg: Optional[CellConfig] = None, spont_path: O
             k = K.analyse_ap(t, V[first], per[first][0].peak_idx, cfg.kin)
             thr_times = [k.thr_t] if k.ok else None
         row["FS Latency (ms)"] = S.first_spike_latency(per[first], origin, thr_times)
-    dec.append(("FS latency", f"first spiking depolarising sweep ({first}); {'peak' if cfg.latency_mode=='peak' else 'threshold'}"
+    dec.append(("FS latency", f"smallest depolarising step with an AP (sweep {first}, dI {dI_all[first] if first is not None else float('nan'):.0f} pA); {'peak' if cfg.latency_mode=='peak' else 'threshold'}"
                               f" time minus origin {origin:.2f} ms"))
     # adaptation
     if cfg.adaptation_mode == "scala_ai":
@@ -147,9 +158,10 @@ def build_cell_report(path: str, cfg: Optional[CellConfig] = None, spont_path: O
         dec.append(("Adaptation", f"Scala 2019: ISI2/ISI1 per sweep (>= 3 spikes), median over the {cfg.ai_n_sweeps} lowest "
                                   f"spiking depolarising sweeps ({len(sel)} available); ratio, not percent"))
     else:
-        k = int(np.argmax(counts)) if counts.max() > 0 else None
+        mx = counts.max()
+        k = min((s_ for s_ in range(len(counts)) if counts[s_] == mx), key=lambda s_: (dI_all[s_] <= 0, dI_all[s_])) if mx > 0 else None
         row["Adaptation"] = S.sfa_divisor(per[k]) if k is not None else np.nan
-        dec.append(("Adaptation", f"EE spike-frequency adaptation, divisor method (first ISI / last ISI) on the first sweep with "
+        dec.append(("Adaptation", f"EE spike-frequency adaptation, divisor method (first ISI / last ISI) on the smallest-current sweep with "
                                   f"the maximum AP count (sweep {k}, {int(counts.max())} APs); ISI between AP peaks. Matches "
                                   "the reference value exactly; the Scala ISI2/ISI1 index is available as 'scala_ai'"))
     # rheobase
@@ -164,14 +176,14 @@ def build_cell_report(path: str, cfg: Optional[CellConfig] = None, spont_path: O
         dec.append(("Rheobase", "EE 'Record': dI of the first sweep with an AP"))
     else:
         bl = np.array([window_mean(t, I[s], t[0], a) for s in range(V.shape[0])])
-        rheo, _ = S.rheobase_exact(per, I, bl)
+        rheo, _ = S.rheobase_exact(per, dI_all, I, bl)
         dec.append(("Rheobase", "EE 'Exact': Im at the sample of the first AP peak minus the Im baseline (mean from the start "
                                 "of the sweep to the step start)"))
     row["Rheobase (pA)"] = rheo
 
     # --------------------------------------------------------------------------------------- kinetics
     kin = None
-    if first_spiking := next((s for s in range(len(per)) if per[s]), None):
+    if first_spiking := next((s for s in order if per[s]), None):
         kin = K.analyse_ap(t, V[first_spiking], per[first_spiking][0].peak_idx, cfg.kin)
     if kin and kin.ok:
         row["Amplitude (mV)"], row["Threshold (mV)"] = kin.amplitude, kin.thr_v
@@ -179,7 +191,7 @@ def build_cell_report(path: str, cfg: Optional[CellConfig] = None, spont_path: O
         row["Rise Time (ms)"], row["Decay Time (ms)"], row["Half-Width (ms)"] = kin.rise_ms, kin.decay_ms, kin.half_width_ms
         row["fAHP (mV)"], row["mAHP (mV)"] = kin.fahp, kin.mahp
     kp = cfg.kin
-    dec.append(("AP kinetics", f"first AP of the first spiking sweep ({first_spiking}); threshold method {kp.thr_method} "
+    dec.append(("AP kinetics", f"first AP of the smallest depolarising step with an AP (sweep {first_spiking}); threshold method {kp.thr_method} "
                                f"(lower bound {kp.method_II_lower if kp.thr_method=='method_II' else kp.method_I_lower} mV/ms), "
                                f"search {kp.thr_search} ms before peak; rise {kp.rise_pct}, decay {kp.decay_pct} of "
                                f"peak->{'threshold' if kp.decay_to_thr else 'fAHP'}; 200 kHz interpolation "

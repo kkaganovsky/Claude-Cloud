@@ -50,4 +50,4 @@ def test_sEPSC_example_runs(cell7_dir):
     p = E.EventParams(omit=((0.0, 400.0),))      # defaults; omit the test pulse at the start of every sweep
     res = E.analyse_events(r.t, r.ch[0], p, r.sweep_start_ms)
     s = E.summarize(res)
-    assert 30 <= s["n"] <= 120 and s["amplitude_median"] < -20
+    assert 30 <= s["n"] <= 300 and s["amplitude_median"] < -10      # RMS lower threshold (2 x RMS) is the default

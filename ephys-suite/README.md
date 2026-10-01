@@ -17,6 +17,31 @@ pytest
 | Events | Template (biexponential, rise 0.5 / decay 5 ms default) detection by **deconvolution** (Pernia-Andrade 2012; the "convolution method"), correlation and detection criterion (Clements & Bekkers 1997 sliding window), or thresholding. Lower threshold (linear / RMS / polynomial curve), upper threshold, amplitude threshold, local-maximum period, omit period, peak smoothing; per-event baseline + foot, amplitude, 10-90 rise, decay % (37), mono-exponential tau, FWHM, AUC, inter-event interval; average event overlay, cumulative probability, KS test; CSV export. |
 | Cell summary | One spreadsheet row in the project's column layout (`report.COLUMNS`) plus a printed list of every decision made. |
 
+## Editing events (Events tab)
+
+The tab shows an edit toolbar, a view toolbar and a one-line hint that always tells you the next step.
+
+| Action | How |
+|---|---|
+| Add an event | **A** (Add mode), then click on it - or drag across it. The peak snaps to the extreme within the snap window (± 2 ms, adjustable). |
+| **Fit kinetics** toggle (**K**) | **ON** (default): the event is measured fully and must pass the thresholds, as in Easy Electrophysiology; if it fails, the hint says why and suggests turning Fit off. **OFF**: any event can be added regardless of the threshold; only peak, baseline and amplitude are measured (`Fit = no` in the table). |
+| Baseline | The baseline preceding the event is found automatically. If none can be found, the tab **prompts you to click the baseline level** (orange peak marker). **Manual baseline (B)** arms the same prompt in advance. After you click, the button switches itself off and you are still in Add mode, so you can keep adding. With an event selected (Add off), **B** moves *that* event's baseline and re-measures it. The baseline must be left of the peak (otherwise it asks again). |
+| Remove an event | Normal mode: click its marker (blue ring), click again to delete (as in EE); or select it and press **Delete / Space**. In Add mode a click on a marker only selects it, so nothing is deleted by accident. |
+| Undo / redo | **Ctrl+Z / Ctrl+Y** (every add, delete and baseline move). |
+| Navigate | **←/→** previous / next event (as in EE); **PageDown / PageUp** (or **Z / X**) next / previous window - running past the end of a record continues in the next one; clicking a table row jumps to the event. |
+| View | X start, width, Y min, Y max boxes (also follow mouse zoom). **Lock Y** keeps the limits while paging / changing record, otherwise Y is fitted to the visible data. **Fit Y** fits once. **Remember view** stores width and Y limits and re-applies them whenever a file is opened. |
+| Re-running detection | **Keep manual edits when re-running** (default on) layers your additions, deletions and baselines over the new detection; **Discard all manual edits** resets. |
+
+Marker legend: red = detected, green diamond = added by hand, white = added without kinetics, blue dot = baseline,
+purple dot = decay endpoint, dashed red line = lower threshold.
+
+## Step ordering
+
+Steps are ordered by their injected current **relative to zero**, never by file position or by one assumed step size:
+`lowest` = most negative step, `smallest` = the last hyperpolarising step before zero (used for tau by default), and
+rheobase / first-spike latency / AP kinetics use the **smallest depolarising step with an AP**. Currents are only rounded
+to a protocol step when the measured spacing is uniform (within 20 %); with uneven steps the measured currents are used.
+
 ## Reproducing the reference cell
 
 `scripts/validate_cell7.py <dir>/` runs the example cell and prints a comparison with the reference spreadsheet row. With the
@@ -65,6 +90,9 @@ defaults (current commit):
   10 ms, average baseline 1 ms, decay search 30 ms, deconvolution band 1-200 Hz (the manual says 0.1 Hz in the background section and
   1 Hz in the options section), cutoff = 3.5 x sigma of the Gaussian fitted to the all-points histogram (pooled across records).
   Omit periods apply to every record's own time axis (the example sEPSC file has a test pulse at 0.1-0.3 s in each sweep).
+- **Lower threshold default = RMS** (record mean -/+ 2 x RMS; 2x is the manual's example multiple; omit periods are excluded from
+  the RMS so a test pulse does not inflate it). On the example sEPSC file this finds 160 events (4 Hz) vs 100 at 3 x RMS and 56
+  with a fixed -5 pA level - raise the multiple if it is too sensitive.
 
 *Differences from your reference that I could not resolve:*
 - **FS latency: 593.1 ms in the reference = 682.2 ms (first AP peak, rheobase sweep) - 89.1 ms.** 89.1 ms is the Im start of the 2.5 s

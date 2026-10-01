@@ -45,9 +45,9 @@ class EventParams:
     deconv_low_hz: float = 1.0                # manual: options default 1 Hz (background text says 0.1 Hz)
     deconv_high_hz: float = 200.0
     # lower / upper thresholds (pA, data units)
-    lower_mode: str = "linear"                # 'linear' | 'rms' | 'curve' | 'none'
+    lower_mode: str = "rms"                   # 'rms' (default) | 'linear' | 'curve' | 'none'
     lower_value: float = -5.0                 # linear: absolute level (negative events must go below it)
-    rms_multiple: float = 2.0                 # rms: baseline -/+ n x RMS
+    rms_multiple: float = 2.0                 # rms: record mean -/+ n x RMS of the data (omit periods excluded)
     curve_order: int = 3                      # curve: polynomial order; lower_value is the offset from the curve
     upper_value: float = 0.0                  # 0 = off; events beyond +/- this level are excluded
     amplitude_threshold: float = 5.0          # pA, |peak - baseline|
@@ -82,7 +82,9 @@ class Event:
     half_width_ms: float = np.nan
     auc: float = np.nan      # pA ms, baseline -> endpoint
     interval_ms: float = np.nan
-    manual: bool = False
+    manual: bool = False            # added by hand
+    fitted: bool = True             # kinetics measured (False: peak, baseline and amplitude only)
+    baseline_manual: bool = False   # baseline level set by hand
 
 
 @dataclass
@@ -230,19 +232,29 @@ def _enforce_min_distance(peaks, heights, min_samples):
     return np.asarray(peaks)[keep]
 
 
+def _omit_mask(t, p: EventParams):
+    """True where the record is NOT inside an omit period."""
+    keep = np.ones(len(t), bool)
+    for a, b in p.omit:
+        keep &= ~((t >= a) & (t <= b))
+    return keep
+
+
 def _lower_threshold_line(t, y, p: EventParams):
     """Level (array over samples, or None) that an event peak must pass (direction-aware)."""
     d = p.direction
+    keep = _omit_mask(t, p)
     if p.lower_mode == "none":
         return None
     if p.lower_mode == "linear":
         return np.full(len(y), p.lower_value)
     if p.lower_mode == "rms":
-        base = y.mean()
-        rms = np.sqrt(np.mean((y - base) ** 2))
+        base = y[keep].mean() if keep.any() else y.mean()
+        yy = y[keep] if keep.any() else y
+        rms = np.sqrt(np.mean((yy - base) ** 2))
         return np.full(len(y), base + d * p.rms_multiple * rms)
     if p.lower_mode == "curve":
-        c = np.polyfit(t, y, p.curve_order)
+        c = np.polyfit(t[keep], y[keep], p.curve_order)
         return np.polyval(c, t) + p.lower_value
     raise ValueError(p.lower_mode)
 
@@ -301,55 +313,77 @@ def _foot(t, y, bl_idx, peak_idx, bl_im):
 
 
 # ------------------------------------------------------------------------------------------------ analysis
-def analyse_event(t, y, peak_idx, prev_peak_idx, next_peak_idx, p: EventParams, record=0, time_offset=0.0,
-                  line=None) -> Optional[Event]:
+REASONS = {
+    "ok": "added",
+    "no_baseline": "no usable baseline before the peak",
+    "bad_baseline": "baseline must be before the peak",
+    "wrong_direction": "peak is not in the event direction relative to the baseline",
+    "amplitude_threshold": "amplitude is below the amplitude threshold",
+    "lower_threshold": "peak does not pass the lower (RMS / linear / curve) threshold",
+    "upper_threshold": "peak exceeds the upper threshold",
+    "duplicate": "an event is already there",
+}
+
+
+def analyse_event_ex(t, y, peak_idx, prev_peak_idx, next_peak_idx, p: EventParams, record=0, time_offset=0.0, line=None,
+                     baseline=None, fit_kinetics=True, apply_thresholds=True, manual=False):
+    """Measure one event. Returns (Event | None, reason key from REASONS).
+
+    baseline: optional (index, level) set by hand; otherwise found automatically (steepest long line to the peak, foot
+    refinement, short average). fit_kinetics=False measures only peak, baseline and amplitude. apply_thresholds=False
+    skips the amplitude / lower / upper threshold tests (used for events added by hand with fitting off)."""
     ts = ts_ms(t)
     direction = p.direction
     pk_im = float(y[peak_idx])
-    n_bl = int(round(p.baseline_search_ms / ts))
-    start = peak_idx - n_bl
-    if prev_peak_idx is not None:
-        start = max(start, prev_peak_idx + 1)
-    start = max(start, 0)
-    bl_idx = _auto_baseline(t, y, peak_idx, start, direction)
-    if bl_idx is None:
-        return None
-    bl_im = float(y[bl_idx])
-    bl_idx = _foot(t, y, bl_idx, peak_idx, bl_im)
-    n_avg = int(round(p.average_baseline_ms / ts))
-    if n_avg > 0:
-        bl_im = float(np.mean(y[max(0, bl_idx - n_avg):bl_idx + 1]))
+    manual_bl = baseline is not None
+    if manual_bl:
+        bl_idx, bl_im = int(baseline[0]), float(baseline[1])
+        if bl_idx >= peak_idx:
+            return None, "bad_baseline"
+    else:
+        n_bl = int(round(p.baseline_search_ms / ts))
+        start = peak_idx - n_bl
+        if prev_peak_idx is not None:
+            start = max(start, prev_peak_idx + 1)
+        start = max(start, 0)
+        bl_idx = _auto_baseline(t, y, peak_idx, start, direction)
+        if bl_idx is None:
+            return None, "no_baseline"
+        bl_im = float(y[bl_idx])
+        bl_idx = _foot(t, y, bl_idx, peak_idx, bl_im)
+        n_avg = int(round(p.average_baseline_ms / ts))
+        if n_avg > 0:
+            bl_im = float(np.mean(y[max(0, bl_idx - n_avg):bl_idx + 1]))
     amp = pk_im - bl_im
-    if np.sign(amp) != direction or abs(amp) < p.amplitude_threshold:
-        return None
-    # lower / upper thresholds
-    if line is not None:
-        lvl = line[peak_idx]
-        if (direction < 0 and not pk_im < lvl) or (direction > 0 and not pk_im > lvl):
-            return None
-    if p.upper_value and abs(pk_im) > abs(p.upper_value):
-        return None
+    if np.sign(amp) != direction:
+        return None, ("wrong_direction" if manual_bl else "no_baseline")
+    if apply_thresholds:
+        if abs(amp) < p.amplitude_threshold:
+            return None, "amplitude_threshold"
+        if line is not None:
+            lvl = line[peak_idx]
+            if (direction < 0 and not pk_im < lvl) or (direction > 0 and not pk_im > lvl):
+                return None, "lower_threshold"
+        if p.upper_value and abs(pk_im) > abs(p.upper_value):
+            return None, "upper_threshold"
     ev = Event(record, int(peak_idx), float(t[peak_idx]), float(t[peak_idx] + time_offset), pk_im, int(bl_idx),
-               float(t[bl_idx]), bl_im, amplitude=amp)
-    # endpoint
+               float(t[bl_idx]), bl_im, amplitude=amp, manual=manual, fitted=bool(fit_kinetics), baseline_manual=manual_bl)
+    if not fit_kinetics:
+        return ev, "ok"
     n_dec = int(round(p.decay_search_ms / ts))
     stop = min(len(y) - 1, peak_idx + n_dec)
     if next_peak_idx is not None:
         stop = min(stop, next_peak_idx - 1)
-    stop = max(stop, peak_idx + 2)
-    stop = min(stop, len(y) - 1)
+    stop = min(max(stop, peak_idx + 2), len(y) - 1)
     if p.decay_endpoint == "first_baseline_cross":
         sm = moving_average(y[peak_idx:stop + 1], 3)
         cross = np.flatnonzero(sm >= bl_im) if direction < 0 else np.flatnonzero(sm <= bl_im)
         end = peak_idx + (int(cross[0]) if cross.size else int(np.abs(sm - bl_im).argmin()))
     else:
         end = stop
-    end = max(end, peak_idx + 2)
-    ev.end_idx = int(min(end, len(y) - 1))
-    # rise
+    ev.end_idx = int(min(max(end, peak_idx + 2), len(y) - 1))
     r = rise_time(y[bl_idx:peak_idx + 1], t[bl_idx:peak_idx + 1], bl_im, pk_im, *p.rise_pct, interp=p.interp)
     ev.rise_ms = float(r[0])
-    # decay % (first nearest sample reaching the given % of amplitude remaining, smoothed 3 samples)
     seg_y = moving_average(y[peak_idx:ev.end_idx + 1], 3)
     seg_t = t[peak_idx:ev.end_idx + 1]
     sy, st = (interp_200khz(seg_y, seg_t) if p.interp else (seg_y, seg_t))
@@ -363,7 +397,12 @@ def analyse_event(t, y, peak_idx, prev_peak_idx, next_peak_idx, p: EventParams, 
                                     t[peak_idx:ev.end_idx + 1], bl_im + amp / 2.0, p.interp)
     ev.half_width_ms = float(hw)
     ev.auc = float(_trapz(y[bl_idx:ev.end_idx + 1] - bl_im, t[bl_idx:ev.end_idx + 1]))
-    return ev
+    return ev, "ok"
+
+
+def analyse_event(t, y, peak_idx, prev_peak_idx, next_peak_idx, p: EventParams, record=0, time_offset=0.0,
+                  line=None) -> Optional[Event]:
+    return analyse_event_ex(t, y, peak_idx, prev_peak_idx, next_peak_idx, p, record, time_offset, line)[0]
 
 
 def detect_in_record(t, y, p: EventParams, measure=None, thr=None):
@@ -445,11 +484,18 @@ def analyse_events(t, Y, p: EventParams, sweep_start_ms=None, sweeps=None) -> Ev
             ev = analyse_event(t, y, int(k), prev_k, next_k, p, s, starts[s], line)
             if ev is not None:
                 events.append(ev)
-    events.sort(key=lambda e: e.time)
-    for a, b in zip(events[:-1], events[1:]):
-        b.interval_ms = b.time - a.time
     total = float(sum(len(t) * ts for _ in sweeps))
-    return EventResults(events, measures, thr, p, total, info)
+    res = EventResults(events, measures, thr, p, total, info)
+    _finish(res)
+    return res
+
+
+def _finish(res: EventResults):
+    res.events.sort(key=lambda e: (e.time, e.peak_idx))
+    prev = None
+    for e in res.events:
+        e.interval_ms = e.time - prev.time if prev is not None else np.nan
+        prev = e
 
 
 # ------------------------------------------------------------------------------------------------ outputs
@@ -508,3 +554,193 @@ def ks_test(a, b):
     """Two-sample Kolmogorov-Smirnov test (manual section 12)."""
     r = stats.ks_2samp(a, b)
     return float(r.statistic), float(r.pvalue)
+
+
+# ------------------------------------------------------------------------------------------- manual editing
+@dataclass
+class ManualEvent:
+    record: int
+    peak_idx: int
+    baseline: Optional[Tuple[int, float]] = None      # (sample, level) set by hand
+    fit: bool = True
+
+
+@dataclass
+class EditLog:
+    added: List[ManualEvent] = field(default_factory=list)
+    deleted: List[Tuple[int, int]] = field(default_factory=list)                  # (record, peak_idx)
+    baselines: dict = field(default_factory=dict)                                 # (record, peak_idx) -> (idx, level)
+
+    def copy(self):
+        return EditLog([ManualEvent(m.record, m.peak_idx, m.baseline, m.fit) for m in self.added], list(self.deleted),
+                       dict(self.baselines))
+
+    def is_empty(self):
+        return not (self.added or self.deleted or self.baselines)
+
+
+class EventSession:
+    """Automatic detection plus manual edits (add / delete / move baseline) with undo.
+
+    The visible event list is always rebuilt as: automatic events - deleted + baseline overrides + manual additions, so
+    edits survive re-running detection with new parameters (`detect(keep_edits=True)`).
+    Adding with fit=True applies the normal thresholds (like Easy Electrophysiology); with fit=False the amplitude / lower /
+    upper thresholds are ignored and only peak, baseline and amplitude are measured."""
+
+    def __init__(self, t, Y, params: EventParams, sweep_start_ms=None):
+        self.t = np.asarray(t, float)
+        self.Y = np.atleast_2d(np.asarray(Y, float))
+        self.p = params
+        self.starts = np.zeros(self.Y.shape[0]) if sweep_start_ms is None else np.asarray(sweep_start_ms, float)
+        self.auto: Optional[EventResults] = None
+        self.log = EditLog()
+        self.events: List[Event] = []
+        self._undo: List[EditLog] = []
+        self._redo: List[EditLog] = []
+
+    # ---------------------------------------------------------------------------------------------- detection
+    @property
+    def ts(self):
+        return ts_ms(self.t)
+
+    def detect(self, keep_edits=True):
+        self.auto = analyse_events(self.t, self.Y, self.p, self.starts)
+        if not keep_edits:
+            self.log = EditLog()
+            self._undo.clear()
+            self._redo.clear()
+        self._rebuild()
+        return self.auto
+
+    def _tol(self):
+        return max(1, int(round(self.p.min_distance_ms / self.ts)))
+
+    def _lines(self):
+        return {r: _lower_threshold_line(self.t, self.Y[r], self.p) for r in range(self.Y.shape[0])}
+
+    def _rebuild(self):
+        if self.auto is None:
+            self.events = []
+            return
+        tol = self._tol()
+        dele = self.log.deleted
+        keep = [e for e in self.auto.events
+                if not any(e.record == r and abs(e.peak_idx - k) <= tol for r, k in dele)]
+        out = []
+        for e in keep:
+            ov = self.log.baselines.get((e.record, e.peak_idx))
+            if ov is not None:
+                ne, why = analyse_event_ex(self.t, self.Y[e.record], e.peak_idx, None, None, self.p, e.record,
+                                           self.starts[e.record], None, baseline=ov, apply_thresholds=False)
+                e = ne if ne is not None else e
+            out.append(e)
+        for m in self.log.added:
+            out = [e for e in out if not (e.record == m.record and abs(e.peak_idx - m.peak_idx) <= tol)]
+            nb = self._neighbours(out, m.record, m.peak_idx)
+            ov = m.baseline or self.log.baselines.get((m.record, m.peak_idx))
+            ev, why = analyse_event_ex(self.t, self.Y[m.record], m.peak_idx, nb[0], nb[1], self.p, m.record,
+                                       self.starts[m.record], None, baseline=ov, fit_kinetics=m.fit,
+                                       apply_thresholds=False, manual=True)
+            if ev is not None:
+                out.append(ev)
+        res = EventResults(out, self.auto.measure, self.auto.threshold, self.p, self.auto.total_ms, self.auto.deconv_info)
+        _finish(res)
+        self.events = res.events
+
+    @staticmethod
+    def _neighbours(events, record, peak_idx):
+        prv = [e.peak_idx for e in events if e.record == record and e.peak_idx < peak_idx]
+        nxt = [e.peak_idx for e in events if e.record == record and e.peak_idx > peak_idx]
+        return (max(prv) if prv else None, min(nxt) if nxt else None)
+
+    # ------------------------------------------------------------------------------------------------ helpers
+    def results(self) -> EventResults:
+        res = EventResults(list(self.events), self.auto.measure if self.auto else [], self.auto.threshold if self.auto else None,
+                           self.p, self.auto.total_ms if self.auto else 0.0, self.auto.deconv_info if self.auto else None)
+        return res
+
+    def snap_peak(self, record, t0_ms, t1_ms=None, half_ms=2.0):
+        """Peak sample in the event direction: the extreme of the data in [t0, t1] (drag), or +/- half_ms around t0 (click)."""
+        y = self.Y[record]
+        if t1_ms is None:
+            a, b = t0_ms - half_ms, t0_ms + half_ms
+        else:
+            a, b = min(t0_ms, t1_ms), max(t0_ms, t1_ms)
+        i, j = idx_at(self.t, a), idx_at(self.t, b)
+        if j <= i:
+            return i
+        seg = y[i:j + 1]
+        return i + (int(np.argmax(seg)) if self.p.direction > 0 else int(np.argmin(seg)))
+
+    def find_event(self, record, peak_idx, tol_samples=None):
+        tol = self._tol() if tol_samples is None else tol_samples
+        c = [e for e in self.events if e.record == record and abs(e.peak_idx - peak_idx) <= tol]
+        return min(c, key=lambda e: abs(e.peak_idx - peak_idx)) if c else None
+
+    # ------------------------------------------------------------------------------------------------- edits
+    def _checkpoint(self):
+        self._undo.append(self.log.copy())
+        self._redo.clear()
+
+    def add(self, record, peak_idx, fit=True, baseline=None):
+        """Add an event at a (snapped) peak sample. Returns (Event | None, reason). Nothing changes on failure."""
+        if self.find_event(record, peak_idx) is not None:
+            return self.find_event(record, peak_idx), "duplicate"
+        nb = self._neighbours(self.events, record, peak_idx)
+        # trial analysis, only to decide whether the add is allowed (thresholds apply when fitting kinetics)
+        line = _lower_threshold_line(self.t, self.Y[record], self.p) if fit else None
+        ev, why = analyse_event_ex(self.t, self.Y[record], peak_idx, nb[0], nb[1], self.p, record, self.starts[record], line,
+                                   baseline=baseline, fit_kinetics=fit, apply_thresholds=fit, manual=True)
+        if ev is None:
+            return None, why
+        self._checkpoint()
+        self.log.deleted = [(r, k) for r, k in self.log.deleted if not (r == record and abs(k - peak_idx) <= self._tol())]
+        self.log.added.append(ManualEvent(record, int(peak_idx), baseline, fit))
+        self._rebuild()
+        return self.find_event(record, peak_idx), "ok"
+
+    def delete(self, ev: Event):
+        self._checkpoint()
+        key = (ev.record, ev.peak_idx)
+        was_manual = [m for m in self.log.added if m.record == ev.record and abs(m.peak_idx - ev.peak_idx) <= self._tol()]
+        if was_manual:
+            self.log.added = [m for m in self.log.added if m not in was_manual]
+        if not was_manual or any(e.record == ev.record and abs(e.peak_idx - ev.peak_idx) <= self._tol()
+                                 for e in (self.auto.events if self.auto else [])):
+            self.log.deleted.append(key)
+        self.log.baselines.pop(key, None)
+        self._rebuild()
+
+    def set_baseline(self, ev: Event, bl_idx: int, bl_level: float):
+        """Move an event's baseline by hand; its other parameters are re-measured."""
+        if bl_idx >= ev.peak_idx:
+            return None, "bad_baseline"
+        trial, why = analyse_event_ex(self.t, self.Y[ev.record], ev.peak_idx, None, None, self.p, ev.record,
+                                      self.starts[ev.record], None, baseline=(bl_idx, bl_level), fit_kinetics=ev.fitted,
+                                      apply_thresholds=False, manual=ev.manual)
+        if trial is None:
+            return None, why
+        self._checkpoint()
+        m = [m for m in self.log.added if m.record == ev.record and abs(m.peak_idx - ev.peak_idx) <= self._tol()]
+        if m:
+            m[0].baseline = (int(bl_idx), float(bl_level))
+        else:
+            self.log.baselines[(ev.record, ev.peak_idx)] = (int(bl_idx), float(bl_level))
+        self._rebuild()
+        return self.find_event(ev.record, ev.peak_idx), "ok"
+
+    def undo(self):
+        if not self._undo:
+            return False
+        self._redo.append(self.log.copy())
+        self.log = self._undo.pop()
+        self._rebuild()
+        return True
+
+    def redo(self):
+        if not self._redo:
+            return False
+        self._undo.append(self.log.copy())
+        self.log = self._redo.pop()
+        self._rebuild()
+        return True

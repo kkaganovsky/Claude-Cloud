@@ -140,19 +140,27 @@ def adaptation_index_scala(spikes):
 
 
 # ----------------------------------------------------------------------------------------------- rheobase
+def order_from_zero(d_im):
+    """Sweep indices of the depolarising steps (dI > 0) ordered by current, smallest first. Ordering by current relative
+    to zero (not by file position) keeps this correct when the steps are uneven or the sweeps are not in order."""
+    d = np.asarray(d_im, float)
+    idx = np.flatnonzero(d > 0)
+    return [int(i) for i in idx[np.argsort(d[idx], kind="stable")]]
+
+
 def rheobase_record(spikes_per_sweep, d_im):
-    """EE 'Record': Im injection of the first record containing an AP. Returns (value, sweep) or (nan, None)."""
-    for s, sp in enumerate(spikes_per_sweep):
-        if sp:
+    """EE 'Record': Im injection of the smallest depolarising step with an AP. Returns (value, sweep) or (nan, None)."""
+    for s in order_from_zero(d_im):
+        if spikes_per_sweep[s]:
             return float(d_im[s]), s
     return np.nan, None
 
 
-def rheobase_exact(spikes_per_sweep, im, baselines):
-    """EE 'Exact': Im at the sample of the first AP peak minus the record's Im baseline."""
-    for s, sp in enumerate(spikes_per_sweep):
-        if sp:
-            return float(im[s][sp[0].peak_idx] - baselines[s]), s
+def rheobase_exact(spikes_per_sweep, d_im, im, baselines):
+    """EE 'Exact': Im at the sample of the first AP peak (smallest depolarising step with an AP) minus the Im baseline."""
+    for s in order_from_zero(d_im):
+        if spikes_per_sweep[s]:
+            return float(im[s][spikes_per_sweep[s][0].peak_idx] - baselines[s]), s
     return np.nan, None
 
 
@@ -166,6 +174,8 @@ def rheobase_scala(spike_counts, currents, duration_s):
     cnt = np.asarray(spike_counts, float)
     pos = cur >= 0
     cur, cnt = cur[pos], cnt[pos]
+    order = np.argsort(cur, kind="stable")             # order by current relative to zero, not by file position
+    cur, cnt = cur[order], cnt[order]
     nz = np.flatnonzero(cnt)
     if nz.size == 0:
         return np.nan, {"mode": "no spikes"}
