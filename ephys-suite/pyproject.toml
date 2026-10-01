@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ephys-suite"
+version = "0.1.0"
+description = "Patch-clamp analysis suite modelled on Easy Electrophysiology: passive properties, AP counting, AP kinetics, event detection"
+requires-python = ">=3.9"
+license = { text = "GPL-3.0-or-later" }
+dependencies = ["numpy", "scipy", "pyabf", "pyqtgraph", "PySide6"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.scripts]
+ephys-suite = "ephys_suite.__main__:main"
+
+[tool.setuptools]
+packages = ["ephys_suite"]

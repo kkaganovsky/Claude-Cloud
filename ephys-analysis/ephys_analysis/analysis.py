@@ -94,7 +94,7 @@ def detect_step(t, i) -> Optional[Tuple[float, float]]:
 def default_params(t, i) -> Params:
     """Params with regions placed from the detected step (baseline = pre-step, measure =
     last 100 ms of the step, as in Scala et al. 2019 Methods, exponential fit window = step
-    onset to the middle of the step)."""
+    onset to step stop)."""
     p = Params()
     st = detect_step(t, i)
     if st is None:
@@ -106,7 +106,7 @@ def default_params(t, i) -> Params:
     t0 = float(t[0])
     p.baseline = (t0, a - 0.02 * L) if a - 0.02 * L > t0 else (t0, t0 + (t[1] - t[0]))
     p.measure = (max(a, b - 100.0), b)   # last 100 ms before step offset (Scala et al. 2019)
-    p.fit_end = a + 0.5 * L      # fit the first half of the step (editable)
+    p.fit_end = b                # fit the whole current injection (end is draggable)
     p.sag_search = min(0.3 * L, 300.0)
     return p
 
