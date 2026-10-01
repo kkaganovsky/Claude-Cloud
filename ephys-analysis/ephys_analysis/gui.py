@@ -137,6 +137,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cb_b0 = QtWidgets.QComboBox()
         self.cb_b0.addItems(["free", "fixed"])
         self.cb_b0.setToolTip("free: b0 fitted\nfixed: b0 = steady-state estimate chosen above")
+        self.cb_src = QtWidgets.QComboBox()
+        self.cb_src.addItems(["smallest", "all"])
+        self.cb_src.setToolTip("smallest: τ from only the smallest hyperpolarizing sweep (just before "
+                               "injected current = 0). all: every analysed hyperpolarizing sweep.\n"
+                               "Rin always uses all analysed sweeps.")
         self.cb_agg = QtWidgets.QComboBox()
         self.cb_agg.addItems(["median", "mean"])
         f.addRow("Fit start", self.cb_fstart)
@@ -146,11 +151,12 @@ class MainWindow(QtWidgets.QMainWindow):
         f.addRow("Fit end", self.sp_fend)
         f.addRow("Exponential terms", self.cb_nexp)
         f.addRow("b0", self.cb_b0)
-        f.addRow("τ across sweeps", self.cb_agg)
+        f.addRow("τ taken from", self.cb_src)
+        f.addRow("τ aggregate (if >1 sweep)", self.cb_agg)
         lay.addWidget(g)
 
         self.chk_allfits = QtWidgets.QCheckBox("Show fits for all analysed sweeps")
-        self.chk_allfits.setChecked(True)
+        self.chk_allfits.setChecked(False)
         self.chk_allfits.toggled.connect(lambda *_: self.redraw())
         lay.addWidget(self.chk_allfits)
         lay.addStretch(1)
@@ -158,7 +164,7 @@ class MainWindow(QtWidgets.QMainWindow):
         for w in (self.sp_lastn, self.sp_spk, self.sp_foff, self.sp_fcus, self.sp_sag, self.sp_fend,
                   *self.sp.values()):
             w.valueChanged.connect(self._on_controls)
-        for w in (self.cb_est, self.cb_fstart, self.cb_nexp, self.cb_b0, self.cb_agg):
+        for w in (self.cb_est, self.cb_fstart, self.cb_nexp, self.cb_b0, self.cb_src, self.cb_agg):
             w.currentIndexChanged.connect(self._on_controls)
         for w in (self.chk_neg, self.chk_spk):
             w.toggled.connect(self._on_controls)
@@ -299,6 +305,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sp_fend.setValue(p.fit_end)
         self.cb_nexp.setCurrentText(str(p.n_exp))
         self.cb_b0.setCurrentText(p.b0_mode)
+        self.cb_src.setCurrentText(p.tau_source)
         self.cb_agg.setCurrentText(p.tau_agg)
         self._busy = False
         self._regions_from_params()
@@ -320,6 +327,7 @@ class MainWindow(QtWidgets.QMainWindow):
         p.fit_end = self.sp_fend.value()
         p.n_exp = int(self.cb_nexp.currentText())
         p.b0_mode = self.cb_b0.currentText()
+        p.tau_source = self.cb_src.currentText()
         p.tau_agg = self.cb_agg.currentText()
 
     def _fit_region_start(self):
@@ -397,7 +405,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 col = (220, 120, 0, 255)
             self._add(self.pv, self.pv.plot(t, self.rec.v[s], pen=pg.mkPen(col, width=width)), False)
             self._add(self.pi, self.pi.plot(t, self.rec.i[s], pen=pg.mkPen(col, width=width)), False)
-        show = used if self.chk_allfits.isChecked() else ({sel} & used)
+        show = used if self.chk_allfits.isChecked() else (({sel} & used) | {r.idx for r in self.results if r.tau_used})
         for r in self.results:
             if r.idx in show and r.fit and r.fit.ok:
                 c = self.pv.plot(r.fit.t, r.fit.y_fit, pen=pg.mkPen((220, 30, 30), width=2, style=Qt.DashLine))
@@ -454,7 +462,7 @@ class MainWindow(QtWidgets.QMainWindow):
                    f"R0 = {S.r0:.1f} MΩ, Cm = τ0/R0 = {S.cm_r0:.1f} pF</span>")
         self.lbl_sum.setText(
             f"<b>Rin</b> = {S.rin:.2f} MΩ (n={S.n}, slope SE {S.stderr:.2f}, R²={S.r ** 2:.4f})<br>"
-            f"<b>τ0</b> ({agg}, n={S.n_tau}, {self.p.n_exp} exp) = {S.tau:.2f} ms (SD {S.tau_sd:.2f})<br>"
+            f"<b>τ0</b> ({'smallest hyperpol. sweep' if self.p.tau_source == 'smallest' else agg}, n={S.n_tau}, {self.p.n_exp} exp) = {S.tau:.2f} ms (SD {S.tau_sd:.2f})<br>"
             f"<b>Cm = τ0 / Rin</b> = {S.cm:.1f} pF" + ref)
         self.table.setRowCount(len(self.results))
         for row, r in enumerate(self.results):
@@ -464,7 +472,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     f"{f.tau:.2f}" if f and f.ok else "", f"{f.r2:.4f}" if f and f.ok else "",
                     f"{r.sag:.2f}" if np.isfinite(r.sag) else "",
                     f"{r.sag_ratio:.3f}" if np.isfinite(r.sag_ratio) else "",
-                    "used" if r.used else (r.note or "unchecked")]
+                    ("used, τ" if r.tau_used else "used") if r.used else (r.note or "unchecked")]
             for c, v in enumerate(vals):
                 it = QtWidgets.QTableWidgetItem(str(v))
                 if not r.used:

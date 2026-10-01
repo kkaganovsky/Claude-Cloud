@@ -48,7 +48,10 @@ class Params:
     fit_end: float = 1000.0          # ms
     n_exp: int = 1                   # number of exponential terms (1-3)
     b0_mode: str = "free"            # 'free' | 'fixed' (b0 = steady-state estimate)
-    tau_agg: str = "median"          # 'median' | 'mean' across sweeps
+    tau_agg: str = "median"          # 'median' | 'mean' across the sweeps tau is taken from
+    tau_source: str = "smallest"     # 'smallest' = only the smallest hyperpolarizing sweep (the one
+                                     # just before injected current = 0); 'all' = every analysed
+                                     # hyperpolarizing sweep. Rin always uses all analysed sweeps.
 
 
 def steady_state(t, y, window, method="mean", last_n=1) -> float:
@@ -200,6 +203,7 @@ class SweepResult:
     sag: float = np.nan
     sag_ratio: float = np.nan
     fit: Optional[FitResult] = None
+    tau_used: bool = False      # this sweep's tau / R0 feeds the reported tau and Cm
     r0: float = np.nan          # MOhm; V_0 / I_ext of the slowest term (paper)
     fit_window: Tuple[float, float] = (np.nan, np.nan)
 
@@ -253,6 +257,11 @@ def analyze(rec, p: Params, sweeps: List[int]):
                 # Vm = Vrest + sum V_i(1 - e^-t/tau_i)  <=>  b_i = -V_i
                 r.r0 = (-r.fit.b1) / (r.dI / 1e3)
         results.append(r)
+    neg = [r for r in results if r.used and r.negative and r.fit and r.fit.ok]
+    if p.tau_source == "smallest" and neg:
+        neg = [min(neg, key=lambda r: abs(r.dI))]
+    for r in neg:
+        r.tau_used = True
     return results, summarize(results, p)
 
 
@@ -280,13 +289,13 @@ def summarize(results: List[SweepResult], p: Params) -> Summary:
             S.rin, S.intercept, S.r, S.stderr = lr.slope, lr.intercept, lr.rvalue, lr.stderr
     elif len(used) == 1 and used[0].dI:
         S.rin = used[0].dV / (used[0].dI / 1e3)
-    taus = np.array([r.fit.tau for r in used if r.fit and r.fit.ok])
+    taus = np.array([r.fit.tau for r in used if r.tau_used])
     S.n_tau = len(taus)
     if len(taus):
         S.tau = float(np.median(taus) if p.tau_agg == "median" else np.mean(taus))
         S.tau_sd = float(np.std(taus, ddof=1)) if len(taus) > 1 else np.nan
     S.cm = capacitance_pF(S.tau, S.rin)
-    ok = [r for r in used if r.fit and r.fit.ok and np.isfinite(r.r0) and r.r0 > 0]
+    ok = [r for r in used if r.tau_used and np.isfinite(r.r0) and r.r0 > 0]
     if ok:
         agg = np.median if p.tau_agg == "median" else np.mean
         S.r0 = float(agg([r.r0 for r in ok]))

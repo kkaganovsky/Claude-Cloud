@@ -112,3 +112,19 @@ def test_biexp_r0_recovers_cm_of_two_compartment_response():
     assert S.r0 == pytest.approx(80, rel=0.02)
     assert S.cm_r0 == pytest.approx(1250, rel=0.03)
     assert S.cm == pytest.approx(833, rel=0.03)
+
+
+def test_tau_from_smallest_hyperpolarizing_sweep_only():
+    rec = make_rec()
+    # give the smallest hyperpolarizing sweep (-20 pA, idx 4) a different tau
+    tt = rec.t
+    dv = -20 / 1e3 * RIN * (1 - np.exp(-(tt - 200) / 40.0))
+    rec.v[4] = VREST + np.where((tt >= 200) & (tt < 1200), dv, 0.0)
+    p = default_params(rec.t, rec.i)
+    res, S = analyze(rec, p, list(range(len(rec.v))))
+    assert [r.idx for r in res if r.tau_used] == [4]
+    assert S.tau == pytest.approx(40.0, rel=0.02)
+    assert S.n == 5 and S.rin == pytest.approx(RIN, rel=5e-3)       # Rin still from all five
+    p.tau_source = "all"
+    _, S_all = analyze(rec, p, list(range(len(rec.v))))
+    assert S_all.n_tau == 5 and S_all.tau == pytest.approx(20.0, rel=0.02)
