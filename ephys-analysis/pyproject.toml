@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ephys-analysis"
+version = "0.1.0"
+description = "GUI for current-clamp .abf analysis: input resistance, membrane time constant and capacitance"
+requires-python = ">=3.9"
+dependencies = ["numpy", "scipy", "pyabf", "pyqtgraph", "PySide6"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.scripts]
+ephys-analysis = "ephys_analysis.__main__:main"
+
+[tool.setuptools]
+packages = ["ephys_analysis"]
