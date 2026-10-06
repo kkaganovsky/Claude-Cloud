@@ -1,6 +1,7 @@
 """Loading .abf files into a unit-normalised Recording (time in ms, Vm in mV, Im in pA)."""
+import os
 from dataclasses import dataclass
-from typing import Optional
+from typing import List, Optional
 
 import numpy as np
 
@@ -55,3 +56,12 @@ def load_abf(path: str, v_channel: Optional[int] = None,
     src = (f"recorded channel {i_channel} ({abf.adcNames[i_channel]})"
            if i_channel is not None else "command waveform from file header")
     return Recording(path, t, np.vstack(vs), np.vstack(is_), src, list(abf.adcNames))
+
+
+def sibling_abfs(path: str) -> List[str]:
+    """All .abf files in the folder of `path`, in natural name order (2 before 10)."""
+    import re
+    d = os.path.dirname(os.path.abspath(path))
+    key = lambda n: [int(x) if x.isdigit() else x.lower() for x in re.split(r"(\d+)", n)]
+    names = sorted((n for n in os.listdir(d) if n.lower().endswith(".abf") and not n.startswith(".")), key=key)
+    return [os.path.join(d, n) for n in names]

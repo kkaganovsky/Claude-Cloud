@@ -36,8 +36,12 @@ class Params:
     step: Tuple[float, float] = (100.0, 1000.0)      # injected step start / stop
     estimator: str = "mean"          # steady-state estimator over `measure`
     last_n: int = 1                  # samples used by the 'last' estimator
-    only_negative: bool = True
-    min_abs_dI: float = 1.0          # pA; |dI| below this is treated as no step
+    rin_sweeps: str = "neg_zero"     # sweeps used for Rin (the 0 pA sweep is always included):
+                                     # 'neg_zero'     = hyperpolarizing steps + 0 pA
+                                     # 'neg_zero_pos' = ... + the n_pos smallest depolarizing steps without spikes
+    n_pos: int = 2
+    min_abs_dI: float = 1.0          # pA; |dI| below this is treated as no step (the 0 pA sweep)
+    round_step: float = 0.0          # pA; round dI to this protocol step (EE 'Round Im injections'); 0 = measured
     exclude_spikes: bool = True
     spike_threshold: float = 0.0     # mV
     # exponential fit
@@ -51,7 +55,9 @@ class Params:
     tau_agg: str = "median"          # 'median' | 'mean' across the sweeps tau is taken from
     tau_source: str = "smallest"     # 'smallest' = only the smallest hyperpolarizing sweep (the one
                                      # just before injected current = 0); 'all' = every analysed
-                                     # hyperpolarizing sweep. Rin always uses all analysed sweeps.
+                                     # hyperpolarizing sweep; 'sweep' = the sweep chosen in tau_sweep.
+                                     # Rin always uses all analysed sweeps.
+    tau_sweep: int = -1              # sweep index for tau_source == 'sweep'
 
 
 def steady_state(t, y, window, method="mean", last_n=1) -> float:
@@ -91,10 +97,41 @@ def detect_step(t, i) -> Optional[Tuple[float, float]]:
     return float(t[idx[0]]), float(t[idx[-1]] + dt)
 
 
+def estimate_step(dI) -> float:
+    """Protocol step (pA) from measured step currents: median spacing of the sorted values, to the
+    nearest 5 pA. 0 (= do not round) when the spacing is not uniform within 20 %."""
+    d = np.diff(np.sort(np.asarray(dI, float)))
+    d = d[d > 1.0]
+    if not d.size:
+        return 0.0
+    med = float(np.median(d))
+    if (d.max() - d.min()) > 0.2 * med:
+        return 0.0
+    return float(5 * round(med / 5))
+
+
+def measured_dI(t, i, p) -> np.ndarray:
+    """Per-sweep dI (pA) = mean Im in the measure region - mean Im in the baseline region
+    (window means, so noise and a constant holding-current offset cancel)."""
+    i = np.atleast_2d(i)
+    return np.array([steady_state(t, row, p.measure, "mean") - steady_state(t, row, p.baseline, "mean")
+                     for row in i])
+
+
+def step_currents(t, i, p) -> np.ndarray:
+    """Per-sweep injected step current (pA): measured dI, rounded to p.round_step when set."""
+    d = measured_dI(t, i, p)
+    return p.round_step * np.round(d / p.round_step) if p.round_step else d
+
+
+MEASURE_GAP_MS = 1.0     # measure window ends this long before the step offset (stays clear of the off-transient)
+FIT_WINDOW_MS = 500.0    # default exponential fit window: step onset -> onset + 500 ms
+
+
 def default_params(t, i) -> Params:
     """Params with regions placed from the detected step (baseline = pre-step, measure =
-    last 100 ms of the step, as in Scala et al. 2019 Methods, exponential fit window = step
-    onset to step stop)."""
+    100 ms ending 1 ms before the step offset (Scala et al. 2019 Methods use the last 100 ms),
+    exponential fit window = step onset to onset + 500 ms, capped at the step offset)."""
     p = Params()
     st = detect_step(t, i)
     if st is None:
@@ -105,9 +142,11 @@ def default_params(t, i) -> Params:
     p.step = (a, b)
     t0 = float(t[0])
     p.baseline = (t0, a - 0.02 * L) if a - 0.02 * L > t0 else (t0, t0 + (t[1] - t[0]))
-    p.measure = (max(a, b - 100.0), b)   # last 100 ms before step offset (Scala et al. 2019)
-    p.fit_end = b                # fit the whole current injection (end is draggable)
+    end = max(a, b - MEASURE_GAP_MS)
+    p.measure = (max(a, end - 100.0), end)   # 100 ms ending 1 ms before step offset (Scala et al. 2019: last 100 ms)
+    p.fit_end = min(a + FIT_WINDOW_MS, b)     # fit the first 500 ms of the step (end is draggable)
     p.sag_search = min(0.3 * L, 300.0)
+    p.round_step = estimate_step(measured_dI(t, i, p))   # 0 if the protocol is not uniform
     return p
 
 
@@ -197,6 +236,8 @@ class SweepResult:
     v_ss: float = np.nan
     spike: bool = False
     negative: bool = False
+    zero: bool = False          # the 0 pA sweep (|dI| <= min_abs_dI)
+    positive: bool = False
     used: bool = False
     note: str = ""
     sag_t: float = np.nan
@@ -222,6 +263,7 @@ class Summary:
     cm: float = np.nan          # pF; tau_slow / Rin (isopotential assumption)
     r0: float = np.nan          # MOhm; aggregate of per-sweep R0
     cm_r0: float = np.nan       # pF; tau_0 / R0 (Golowasch 2009, non-isopotential)
+    tau_note: str = ""          # why no tau, when the chosen tau sweep cannot be used
 
 
 def capacitance_pF(tau_ms: float, rin_mohm: float) -> float:
@@ -241,29 +283,61 @@ def analyze(rec, p: Params, sweeps: List[int]):
         r.dV = r.v_ss - r.v_base
         r.dI = (steady_state(t, i, p.measure, "mean")
                 - steady_state(t, i, p.baseline, "mean"))
+        if p.round_step:
+            r.dI = p.round_step * round(r.dI / p.round_step)
         r.negative = r.dI < -p.min_abs_dI
+        r.zero = abs(r.dI) <= p.min_abs_dI
+        r.positive = r.dI > p.min_abs_dI
         m = (t >= p.step[0]) & (t <= p.step[1])
         r.spike = bool(m.any() and v[m].max() > p.spike_threshold)
         r.used = s in sweeps and np.isfinite(r.dV) and np.isfinite(r.dI)
-        if r.used and p.only_negative and not r.negative:
-            r.used, r.note = False, "not hyperpolarizing"
+        if r.used and r.positive:      # depolarizing steps are added below, only if the mode asks for them
+            r.used, r.note = False, "depolarizing"
         if r.used and p.exclude_spikes and r.spike:
             r.used, r.note = False, "spikes"
         if r.negative:
             r.sag_t, r.sag_v, r.sag, r.sag_ratio = sag_metrics(
                 t, v, r.v_base, r.v_ss, p.step[0], p.sag_search)
-        if r.used:
+        if r.used and not r.zero:     # no step on the 0 pA sweep: nothing to fit
             r.fit, r.fit_window = _fit_sweep(t, v, r, p)
             if r.fit and r.fit.ok and r.dI:
                 # Vm = Vrest + sum V_i(1 - e^-t/tau_i)  <=>  b_i = -V_i
                 r.r0 = (-r.fit.b1) / (r.dI / 1e3)
         results.append(r)
-    neg = [r for r in results if r.used and r.negative and r.fit and r.fit.ok]
-    if p.tau_source == "smallest" and neg:
-        neg = [min(neg, key=lambda r: abs(r.dI))]
-    for r in neg:
+    if p.rin_sweeps == "neg_zero_pos":
+        # the n_pos smallest depolarizing steps (by current) that have no spike; spiking ones are skipped
+        cand = sorted((r for r in results if r.positive and r.idx in sweeps
+                       and np.isfinite(r.dV) and np.isfinite(r.dI)), key=lambda r: r.dI)
+        picked = [r for r in cand if not r.spike][:max(0, int(p.n_pos))]
+        for r in cand:
+            if r in picked:
+                r.used, r.note = True, ""
+                r.fit, r.fit_window = _fit_sweep(t, rec.v[r.idx], r, p)
+            else:
+                r.note = "depolarizing, spikes" if r.spike else f"depolarizing (not among {p.n_pos} smallest)"
+    tau_note = ""
+    if p.tau_source == "sweep":
+        # the user-chosen sweep: any analysed sweep with a step (not the 0 pA sweep) whose fit converged
+        r = results[p.tau_sweep] if 0 <= p.tau_sweep < len(results) else None
+        if r is None:
+            src, tau_note = [], f"τ sweep {p.tau_sweep} does not exist"
+        elif not r.used:
+            src, tau_note = [], f"τ sweep {r.idx} is not analysed ({r.note or 'unchecked'})"
+        elif r.zero:
+            src, tau_note = [], f"τ sweep {r.idx} is the 0 pA sweep (no step to fit)"
+        elif not (r.fit and r.fit.ok):
+            src, tau_note = [], f"τ sweep {r.idx}: exponential fit failed"
+        else:
+            src = [r]
+    else:
+        src = [r for r in results if r.used and r.negative and r.fit and r.fit.ok]
+        if p.tau_source == "smallest" and src:
+            src = [min(src, key=lambda r: abs(r.dI))]
+    for r in src:
         r.tau_used = True
-    return results, summarize(results, p)
+    S = summarize(results, p)
+    S.tau_note = tau_note
+    return results, S
 
 
 def _fit_sweep(t, v, r: SweepResult, p: Params):
@@ -302,3 +376,16 @@ def summarize(results: List[SweepResult], p: Params) -> Summary:
         S.r0 = float(agg([r.r0 for r in ok]))
         S.cm_r0 = float(agg([capacitance_pF(r.fit.tau, r.r0) for r in ok]))
     return S
+
+
+COPY_HEADER = ("File", "Rin_MOhm", "Cm_pF")
+
+
+def copy_row(path: str, S: "Summary") -> str:
+    """One tab-separated line (file name, Rin MOhm, Cm pF) that pastes into three spreadsheet cells.
+    Empty cells for values that could not be computed."""
+    import os
+
+    def num(x, dec):
+        return f"{x:.{dec}f}" if x is not None and np.isfinite(x) else ""
+    return "\t".join([os.path.basename(path or ""), num(S.rin, 2), num(S.cm, 1)])

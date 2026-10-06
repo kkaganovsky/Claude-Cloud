@@ -5,13 +5,17 @@ import sys
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
 from . import analysis as A
-from .io import load_abf
+from . import state as ST
+from .io import load_abf, sibling_abfs
 
 pg.setConfigOptions(antialias=False, background="w", foreground="k")
+
+RIN_MODES = (("Negative + 0 pA", "neg_zero"),
+             ("Negative + 0 pA + 2 smallest positive (no spikes)", "neg_zero_pos"))
 
 BASE_COL = (150, 150, 150, 70)
 MEAS_COL = (40, 170, 70, 70)
@@ -38,7 +42,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.p = A.Params()
         self.results, self.summary = [], A.Summary()
         self._busy = False
+        self.settings = QtCore.QSettings("ephys-analysis", "ephys-analysis")
         self._build()
+        self.setAcceptDrops(True)
 
     # ------------------------------------------------------------------ layout
     def _build(self):
@@ -48,11 +54,36 @@ class MainWindow(QtWidgets.QMainWindow):
         split.addWidget(self._build_plots())
         split.addWidget(self._build_results())
         split.setSizes([400, 680, 450])
-        self.statusBar().showMessage("Open an .abf file (File > Open or Ctrl+O)")
+        self.statusBar().showMessage("Open an .abf file (File > Open, Ctrl+O, or drag it onto the window)")
         m = self.menuBar().addMenu("&File")
         a = m.addAction("&Open .abf…")
         a.setShortcut("Ctrl+O")
         a.triggered.connect(self.open_dialog)
+        a = m.addAction("&Previous file in folder")
+        a.setShortcut("Ctrl+[")
+        a.triggered.connect(lambda: self.step_file(-1))
+        a = m.addAction("&Next file in folder")
+        a.setShortcut("Ctrl+]")
+        a.triggered.connect(lambda: self.step_file(+1))
+        tb = self.addToolBar("Files")
+        tb.setMovable(False)
+        self.act_prev = tb.addAction("\u25c0 Previous file", lambda: self.step_file(-1))
+        self.act_next = tb.addAction("Next file \u25b6", lambda: self.step_file(+1))
+        self.act_prev.setToolTip("Previous .abf in this folder (Ctrl+[)")
+        self.act_next.setToolTip("Next .abf in this folder (Ctrl+])")
+        self.lbl_pos = QtWidgets.QLabel("  no file")
+        tb.addWidget(self.lbl_pos)
+        self._update_nav()
+        m.addSeparator()
+        a = m.addAction("&Save analysis")
+        a.setShortcut("Ctrl+S")
+        a.triggered.connect(self.save_analysis)
+        a = m.addAction("Save analysis &as…")
+        a.setShortcut("Ctrl+Shift+S")
+        a.triggered.connect(self.save_analysis_as)
+        a = m.addAction("Open saved &analysis…")
+        a.triggered.connect(self.open_state_dialog)
+        m.addSeparator()
         a = m.addAction("&Export results CSV…")
         a.triggered.connect(self.export_csv)
 
@@ -108,14 +139,23 @@ class MainWindow(QtWidgets.QMainWindow):
                                "mean / median / last sample(s) / line = OLS line extrapolated to region end")
         self.sp_lastn = QtWidgets.QSpinBox()
         self.sp_lastn.setRange(1, 10000)
-        self.chk_neg = QtWidgets.QCheckBox("Only negative ΔIm")
-        self.chk_neg.setChecked(True)
+        self.cb_rin = QtWidgets.QComboBox()
+        for label, key in RIN_MODES:
+            self.cb_rin.addItem(label, key)
+        self.cb_rin.setToolTip("Sweeps used for the Rin line. The 0 pA sweep (|ΔIm| ≤ 1 pA, ΔVm ~ 0) is always\n"
+                               "included: it anchors the line and gives the fit a residual. It is never used for τ or sag.\n"
+                               "'+ 2 positive' adds the two smallest depolarizing steps that have no spike\n"
+                               "(Vm stays below the spike threshold during the step); spiking steps are skipped.")
+        self.sp_round = dspin(0, 1000, 1, " pA", 5)
+        self.sp_round.setToolTip("Round ΔIm to this protocol step (Easy Electrophysiology 'Round Im injections').\n"
+                                 "Auto-set when the steps are evenly spaced; 0 = use the measured ΔIm.")
         self.chk_spk = QtWidgets.QCheckBox("Exclude sweeps with spikes")
         self.chk_spk.setChecked(True)
         self.sp_spk = dspin(-100, 100, 1, " mV")
         f.addRow("Steady-state estimator", self.cb_est)
         f.addRow("'last': samples averaged", self.sp_lastn)
-        f.addRow(self.chk_neg)
+        f.addRow("Sweeps for Rin", self.cb_rin)
+        f.addRow("Round ΔIm to step (0 = off)", self.sp_round)
         f.addRow(self.chk_spk)
         f.addRow("Spike threshold", self.sp_spk)
         lay.addWidget(g)
@@ -138,10 +178,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cb_b0.addItems(["free", "fixed"])
         self.cb_b0.setToolTip("free: b0 fitted\nfixed: b0 = steady-state estimate chosen above")
         self.cb_src = QtWidgets.QComboBox()
-        self.cb_src.addItems(["smallest", "all"])
+        self.cb_src.addItems(["smallest", "all", "sweep"])
         self.cb_src.setToolTip("smallest: τ from only the smallest hyperpolarizing sweep (just before "
                                "injected current = 0). all: every analysed hyperpolarizing sweep.\n"
-                               "Rin always uses all analysed sweeps.")
+                               "sweep: the sweep chosen below (or double-click a row in the results table).\n"
+                               "Cm = τ / Rin. Rin always uses all analysed sweeps.")
+        self.sp_tausw = QtWidgets.QSpinBox()
+        self.sp_tausw.setRange(0, 0)
+        self.sp_tausw.setPrefix("sweep ")
+        self.sp_tausw.setToolTip("Sweep whose τ is used for Cm (when 'τ taken from' = sweep).\n"
+                                 "Tip: double-click a row in the results table to pick it.")
         self.cb_agg = QtWidgets.QComboBox()
         self.cb_agg.addItems(["median", "mean"])
         f.addRow("Fit start", self.cb_fstart)
@@ -152,6 +198,7 @@ class MainWindow(QtWidgets.QMainWindow):
         f.addRow("Exponential terms", self.cb_nexp)
         f.addRow("b0", self.cb_b0)
         f.addRow("τ taken from", self.cb_src)
+        f.addRow("  τ sweep", self.sp_tausw)
         f.addRow("τ aggregate (if >1 sweep)", self.cb_agg)
         lay.addWidget(g)
 
@@ -161,12 +208,12 @@ class MainWindow(QtWidgets.QMainWindow):
         lay.addWidget(self.chk_allfits)
         lay.addStretch(1)
 
-        for w in (self.sp_lastn, self.sp_spk, self.sp_foff, self.sp_fcus, self.sp_sag, self.sp_fend,
+        for w in (self.sp_lastn, self.sp_spk, self.sp_round, self.sp_tausw, self.sp_foff, self.sp_fcus, self.sp_sag, self.sp_fend,
                   *self.sp.values()):
             w.valueChanged.connect(self._on_controls)
-        for w in (self.cb_est, self.cb_fstart, self.cb_nexp, self.cb_b0, self.cb_src, self.cb_agg):
+        for w in (self.cb_est, self.cb_rin, self.cb_fstart, self.cb_nexp, self.cb_b0, self.cb_src, self.cb_agg):
             w.currentIndexChanged.connect(self._on_controls)
-        for w in (self.chk_neg, self.chk_spk):
+        for w in (self.chk_spk,):
             w.toggled.connect(self._on_controls)
         return sa
 
@@ -235,45 +282,243 @@ class MainWindow(QtWidgets.QMainWindow):
             ["Sweep", "ΔIm pA", "ΔVm mV", "Rin (ΔV/ΔI) MΩ", "τ ms", "fit R²", "Sag mV", "Sag ratio", "Used / note"])
         self.table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeToContents)
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self.table.setToolTip("Double-click a row to take τ (for Cm) from that sweep")
+        self.table.cellDoubleClicked.connect(self._tau_from_row)
         v.addWidget(self.table, 4)
+
+        g = QtWidgets.QGroupBox("Copy to spreadsheet (pastes into 3 cells: file, Rin MΩ, Cm pF)")
+        h = QtWidgets.QHBoxLayout(g)
+        self.copy_edit = QtWidgets.QLineEdit()
+        self.copy_edit.setReadOnly(True)
+        self.copy_edit.setStyleSheet("font-family: Menlo, Consolas, monospace; font-size: 13px;")
+        self.btn_copy = QtWidgets.QPushButton("Copy")
+        self.btn_copy.setToolTip("Copy file name, Rin and Cm (tab-separated) to the clipboard")
+        self.btn_copy.clicked.connect(lambda: self._copy(False))
+        self.btn_copy_h = QtWidgets.QPushButton("Copy with header")
+        self.btn_copy_h.clicked.connect(lambda: self._copy(True))
+        h.addWidget(self.copy_edit, 1)
+        h.addWidget(self.btn_copy)
+        h.addWidget(self.btn_copy_h)
+        v.addWidget(g)
+        row = QtWidgets.QHBoxLayout()
+        self.btn_save = QtWidgets.QPushButton("Save analysis (Ctrl+S)")
+        self.btn_save.setToolTip("Save every setting and the checked sweeps next to the .abf\n"
+                                 f"(<name>{ST.SUFFIX}). Opening the .abf again offers to restore it.")
+        self.btn_save.clicked.connect(self.save_analysis)
+        self.lbl_saved = QtWidgets.QLabel("")
+        self.lbl_saved.setStyleSheet("color: #666;")
+        row.addWidget(self.btn_save)
+        row.addWidget(self.lbl_saved, 1)
+        v.addLayout(row)
         tabs.addTab(w, "Results")
         return tabs
 
     # ------------------------------------------------------------------ data
+    def _update_nav(self):
+        path = self.rec.path if self.rec is not None else None
+        files = sibling_abfs(path) if path else []
+        p = os.path.abspath(path) if path else None
+        i = files.index(p) if p in files else -1
+        self.act_prev.setEnabled(i > 0)
+        self.act_next.setEnabled(0 <= i < len(files) - 1)
+        self.lbl_pos.setText(f"  {i + 1} / {len(files)}:  {os.path.basename(path)}" if i >= 0 else "  no file")
+
+    def step_file(self, d):
+        if self.rec is None:
+            return
+        files = sibling_abfs(self.rec.path)
+        p = os.path.abspath(self.rec.path)
+        if p in files and 0 <= files.index(p) + d < len(files):
+            self.load(files[files.index(p) + d])
+
+    def _copy(self, header=False):
+        txt = self.copy_edit.text()
+        if not txt:
+            return
+        if header:
+            txt = "\t".join(A.COPY_HEADER) + "\n" + txt
+        QtGui.QGuiApplication.clipboard().setText(txt)
+        self.statusBar().showMessage("Copied: " + txt.replace("\t", "  |  ").replace("\n", "   /   "), 4000)
+
+    def _last_dir(self):
+        d = self.settings.value("last_dir", "", type=str)
+        return d if d and os.path.isdir(d) else os.path.expanduser("~")
+
     def open_dialog(self):
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Open ABF", "", "Axon ABF (*.abf);;All files (*)")
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Open ABF or saved analysis", self._last_dir(),
+            f"Axon ABF or saved analysis (*.abf *{ST.SUFFIX});;Axon ABF (*.abf);;All files (*)")
         if path:
+            self.open_any(path)
+
+    def open_any(self, path):
+        if path.lower().endswith(".json"):
+            self.restore_state(path)
+        else:
             self.load(path)
 
-    def load(self, path):
+    # ------------------------------------------------------------ save / restore analysis
+    def _set_selected(self, sweeps):
+        sel = set(int(s) for s in sweeps)
+        self._busy = True
+        for r in range(self.sweep_list.count()):
+            self.sweep_list.item(r).setCheckState(Qt.Checked if r in sel else Qt.Unchecked)
+        self._busy = False
+
+    def save_analysis(self, path=None):
+        if self.rec is None:
+            return
+        path = path or ST.sidecar_path(self.rec.path)
+        self.recompute()
+        try:
+            ST.save_state(path, self.rec.path, self.p, self._selected(), self.summary)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Could not save analysis", f"{path}\n\n{e}")
+            return
+        self.lbl_saved.setText(f"saved: {os.path.basename(path)}")
+        self.statusBar().showMessage(f"Saved analysis to {path}", 6000)
+
+    def save_analysis_as(self):
+        if self.rec is None:
+            return
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save analysis", ST.sidecar_path(self.rec.path),
+                                                        f"Saved analysis (*{ST.SUFFIX});;JSON (*.json)")
+        if path:
+            self.save_analysis(path)
+
+    def open_state_dialog(self):
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Open saved analysis", self._last_dir(),
+                                                        f"Saved analysis (*{ST.SUFFIX} *.json);;All files (*)")
+        if path:
+            self.restore_state(path)
+
+    def restore_state(self, json_path):
+        try:
+            st = ST.read_state(json_path)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Could not read saved analysis", f"{json_path}\n\n{e}")
+            return
+        abf = ST.resolve_abf(st, json_path)
+        if abf is None:
+            abf, _ = QtWidgets.QFileDialog.getOpenFileName(
+                self, f"Locate {st['abf'].get('name', 'the .abf')}", os.path.dirname(json_path), "Axon ABF (*.abf)")
+            if not abf:
+                return
+        if not self.load(abf, offer_restore=False):
+            return
+        warn = []
+        if ST.file_sha256(abf) != st["abf"].get("sha256"):
+            warn.append("The .abf file is not byte-identical to the one the analysis was saved from.")
+        self.p = ST.params_from_dict(st["params"])
+        self._params_to_controls()
+        self._set_selected(st.get("sweeps_analysed", []))
+        self._relabel()
+        self.recompute()
+        diff = ST.compare_results(st.get("results", {}), self.summary)
+        if diff:
+            warn.append("Re-running the saved settings gives different results:\n  " + "\n  ".join(diff))
+        name = os.path.basename(json_path)
+        if warn:
+            QtWidgets.QMessageBox.warning(self, "Restored, but not identical", "\n\n".join(warn))
+            self.lbl_saved.setText(f"restored {name} (differences, see warning)")
+        else:
+            self.lbl_saved.setText(f"restored {name} – results reproduced exactly (saved {st.get('saved', '?')})")
+        self.statusBar().showMessage(f"Restored analysis from {json_path}", 8000)
+
+    # drag and drop: an .abf dropped anywhere on the window opens it (the event filter is installed on the
+    # application in run(), so drops onto the plots / tables, which have their own drop handling, also arrive here)
+    @staticmethod
+    def _dropped_abf(event):
+        md = event.mimeData()
+        if md is None or not md.hasUrls():
+            return None
+        for u in md.urls():
+            f = u.toLocalFile()
+            if f and f.lower().endswith((".abf", ".json")) and os.path.isfile(f):
+                return f
+        return None
+
+    def eventFilter(self, obj, event):
+        et = event.type()
+        T = QtCore.QEvent.Type
+        if et in (T.DragEnter, T.DragMove, T.Drop):
+            w = obj if isinstance(obj, QtWidgets.QWidget) else None
+            if w is not None and (w is self or self.isAncestorOf(w)):
+                f = self._dropped_abf(event)
+                if f:
+                    event.setDropAction(Qt.DropAction.CopyAction)
+                    event.accept()
+                    if et == T.Drop:
+                        QtCore.QTimer.singleShot(0, lambda f=f: self.open_any(f))
+                    return True
+        return super().eventFilter(obj, event)
+
+    def load(self, path, offer_restore=True):
         try:
             rec = load_abf(path)
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "Could not load file", f"{path}\n\n{e}")
-            return
+            return False
         self.rec = rec
+        self.lbl_saved.setText("")
+        self._update_nav()
+        self.settings.setValue("last_dir", os.path.dirname(os.path.abspath(path)))
         self.lbl_file.setText(f"{os.path.basename(path)}\n{rec.v.shape[0]} sweeps, "
                               f"{rec.t[1] - rec.t[0]:.4f} ms/sample\nIm: {rec.i_source}")
+        self.p = A.default_params(rec.t, rec.i)
+        self.sp_tausw.blockSignals(True)
+        self.sp_tausw.setRange(0, max(0, rec.v.shape[0] - 1))
+        self.sp_tausw.blockSignals(False)
         self._busy = True
         self.sweep_list.clear()
         for s in range(rec.v.shape[0]):
-            it = QtWidgets.QListWidgetItem(f"Sweep {s}  ({self._nominal(s)})")
+            it = QtWidgets.QListWidgetItem(f"Sweep {s}")
             it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
             it.setCheckState(Qt.Checked)
             self.sweep_list.addItem(it)
         self._busy = False
-        self.p = A.default_params(rec.t, rec.i)
+        self._relabel()
         self._params_to_controls()
         self._plot_traces()
         self.recompute()
         self.statusBar().showMessage(f"Loaded {path}")
+        side = ST.sidecar_path(path)
+        if offer_restore and os.path.isfile(side):
+            try:
+                when = ST.read_state(side).get("saved", "?")
+            except Exception:
+                when = "?"
+            ans = QtWidgets.QMessageBox.question(
+                self, "Saved analysis found",
+                f"A saved analysis exists for this file:\n{os.path.basename(side)}  (saved {when})\n\nRestore it?",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.Yes)
+            if ans == QtWidgets.QMessageBox.Yes:
+                self.restore_state(side)
+        return True
 
-    def _nominal(self, s):
-        i = self.rec.i[s]
-        k2 = max(1, len(i) // 50)
-        hold = np.median(np.r_[i[:k2], i[-k2:]])
-        d = i[np.argmax(np.abs(i - hold))] - hold
-        return f"{d:+.0f} pA"
+    def _relabel(self):
+        """Sweep labels = step current from the baseline / measure window means (rounded to the
+        protocol step when set), i.e. the same ΔIm the analysis uses. (Labels used to come from the
+        single most extreme Im sample, which adds noise and read a few pA too large.)"""
+        if self.rec is None:
+            return
+        d = A.step_currents(self.rec.t, self.rec.i, self.p)
+        fmt = "{:+.0f} pA" if self.p.round_step else "{:+.1f} pA"
+        self.sweep_list.blockSignals(True)
+        for s in range(min(len(d), self.sweep_list.count())):
+            self.sweep_list.item(s).setText(f"Sweep {s}  ({fmt.format(d[s])})")
+        self.sweep_list.blockSignals(False)
+
+    def _tau_from_row(self, row, _col=0):
+        if self.rec is None or not (0 <= row < len(self.results)):
+            return
+        self._busy = True
+        self.sp_tausw.setValue(self.results[row].idx)
+        self.cb_src.setCurrentText("sweep")
+        self._busy = False
+        self.p.tau_sweep = self.results[row].idx
+        self.p.tau_source = "sweep"
+        self._on_controls()
 
     def _check_all(self, on):
         self._busy = True
@@ -295,7 +540,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self.sp[k].setValue(val)
         self.cb_est.setCurrentText(p.estimator)
         self.sp_lastn.setValue(p.last_n)
-        self.chk_neg.setChecked(p.only_negative)
+        self.cb_rin.setCurrentIndex(max(0, self.cb_rin.findData(p.rin_sweeps)))
+        self.sp_round.setValue(p.round_step)
         self.chk_spk.setChecked(p.exclude_spikes)
         self.sp_spk.setValue(p.spike_threshold)
         self.cb_fstart.setCurrentText(p.fit_start_mode)
@@ -306,6 +552,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cb_nexp.setCurrentText(str(p.n_exp))
         self.cb_b0.setCurrentText(p.b0_mode)
         self.cb_src.setCurrentText(p.tau_source)
+        if p.tau_sweep >= 0:
+            self.sp_tausw.setValue(p.tau_sweep)
+        self.sp_tausw.setEnabled(p.tau_source == "sweep")
         self.cb_agg.setCurrentText(p.tau_agg)
         self._busy = False
         self._regions_from_params()
@@ -317,7 +566,8 @@ class MainWindow(QtWidgets.QMainWindow):
         p.step = (sp["s0"].value(), sp["s1"].value())
         p.estimator = self.cb_est.currentText()
         p.last_n = self.sp_lastn.value()
-        p.only_negative = self.chk_neg.isChecked()
+        p.rin_sweeps = self.cb_rin.currentData()
+        p.round_step = self.sp_round.value()
         p.exclude_spikes = self.chk_spk.isChecked()
         p.spike_threshold = self.sp_spk.value()
         p.fit_start_mode = self.cb_fstart.currentText()
@@ -327,7 +577,17 @@ class MainWindow(QtWidgets.QMainWindow):
         p.fit_end = self.sp_fend.value()
         p.n_exp = int(self.cb_nexp.currentText())
         p.b0_mode = self.cb_b0.currentText()
-        p.tau_source = self.cb_src.currentText()
+        src = self.cb_src.currentText()
+        if src == "sweep" and p.tau_source != "sweep" and p.tau_sweep < 0:
+            # switching to 'sweep': start from the sweep tau currently comes from
+            cur = [r.idx for r in self.results if r.tau_used]
+            if cur:
+                self.sp_tausw.blockSignals(True)
+                self.sp_tausw.setValue(cur[0])
+                self.sp_tausw.blockSignals(False)
+        p.tau_source = src
+        p.tau_sweep = self.sp_tausw.value() if src == "sweep" else p.tau_sweep
+        self.sp_tausw.setEnabled(src == "sweep")
         p.tau_agg = self.cb_agg.currentText()
 
     def _fit_region_start(self):
@@ -349,6 +609,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self._controls_to_params()
         self._regions_from_params()
+        self._relabel()
         self.recompute()
 
     def _on_region(self, key):
@@ -375,6 +636,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self.p = A.default_params(self.rec.t, self.rec.i)
         self._params_to_controls()
+        self._relabel()
         self.recompute()
 
     # ------------------------------------------------------------- plotting
@@ -435,6 +697,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.redraw()
         self._update_ri_plot()
         self._update_table()
+        self.copy_edit.setText(A.copy_row(self.rec.path, self.summary))
 
     def _update_ri_plot(self):
         self.pri.clear()
@@ -460,10 +723,16 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.p.n_exp > 1 and np.isfinite(S.cm_r0):
             ref = (f"<br><span style='color:#777'>Reference only (Golowasch 2009, non-isopotential): "
                    f"R0 = {S.r0:.1f} MΩ, Cm = τ0/R0 = {S.cm_r0:.1f} pF</span>")
+        tau_sw = [r.idx for r in self.results if r.tau_used]
+        src_txt = {"smallest": f"smallest hyperpol. sweep = {tau_sw[0] if tau_sw else '–'}",
+                   "all": f"{agg} of hyperpol. sweeps",
+                   "sweep": f"chosen sweep {self.p.tau_sweep}"}.get(self.p.tau_source, self.p.tau_source)
+        if S.tau_note:
+            src_txt += f" – <span style='color:#c00'>{S.tau_note}</span>"
         self.lbl_sum.setText(
-            f"<b>Rin</b> = {S.rin:.2f} MΩ (n={S.n}, slope SE {S.stderr:.2f}, R²={S.r ** 2:.4f})<br>"
-            f"<b>τ0</b> ({'smallest hyperpol. sweep' if self.p.tau_source == 'smallest' else agg}, n={S.n_tau}, {self.p.n_exp} exp) = {S.tau:.2f} ms (SD {S.tau_sd:.2f})<br>"
-            f"<b>Cm = τ0 / Rin</b> = {S.cm:.1f} pF" + ref)
+            f"<b>Rin</b> = {S.rin:.2f} MΩ ({dict((k, l) for l, k in RIN_MODES)[self.p.rin_sweeps]}; n={S.n}, slope SE {S.stderr:.2f}, R²={S.r ** 2:.4f})<br>"
+            f"<b>τ0</b> ({src_txt}, n={S.n_tau}, {self.p.n_exp} exp) = {S.tau:.2f} ms (SD {S.tau_sd:.2f})<br>"
+            f"<b>Cm = τ0 [ms] / Rin [MΩ] × 1000</b> = {S.tau:.2f} / {S.rin:.2f} × 1000 = <b>{S.cm:.1f} pF</b>" + ref)
         self.table.setRowCount(len(self.results))
         for row, r in enumerate(self.results):
             f = r.fit
@@ -472,7 +741,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     f"{f.tau:.2f}" if f and f.ok else "", f"{f.r2:.4f}" if f and f.ok else "",
                     f"{r.sag:.2f}" if np.isfinite(r.sag) else "",
                     f"{r.sag_ratio:.3f}" if np.isfinite(r.sag_ratio) else "",
-                    ("used, τ" if r.tau_used else "used") if r.used else (r.note or "unchecked")]
+                    ("used, τ" if r.tau_used else ("used (0 pA)" if r.zero else ("used (depol.)" if r.positive else "used"))) if r.used else (r.note or "unchecked")]
             for c, v in enumerate(vals):
                 it = QtWidgets.QTableWidgetItem(str(v))
                 if not r.used:
@@ -492,7 +761,9 @@ class MainWindow(QtWidgets.QMainWindow):
             w.writerow(["file", self.rec.path])
             w.writerow(["Rin_MOhm", S.rin, "tau_ms", S.tau, "tau_agg", p.tau_agg, "Cm_pF", S.cm])
             w.writerow(["baseline_ms", *p.baseline, "measure_ms", *p.measure, "estimator", p.estimator,
-                        "fit_start_mode", p.fit_start_mode, "fit_end_ms", p.fit_end, "b0", p.b0_mode])
+                        "fit_start_mode", p.fit_start_mode, "fit_end_ms", p.fit_end, "b0", p.b0_mode,
+                        "rin_sweeps", p.rin_sweeps,
+                        "round_dI_pA", p.round_step])
             w.writerow(["sweep", "dI_pA", "dV_mV", "used", "note", "tau_ms", "fit_b0", "fit_b1", "fit_r2",
                         "sag_mV", "sag_ratio"])
             for r in self.results:
@@ -505,7 +776,8 @@ class MainWindow(QtWidgets.QMainWindow):
 def run(path=None):
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     w = MainWindow()
+    app.installEventFilter(w)      # drag-and-drop of .abf files anywhere in the window
     w.show()
     if path:
-        w.load(path)
+        w.open_any(path)
     app.exec()
