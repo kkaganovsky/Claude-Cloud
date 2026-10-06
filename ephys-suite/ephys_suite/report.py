@@ -109,7 +109,9 @@ def build_cell_report(path: str, cfg: Optional[CellConfig] = None, spont_path: O
         ("Step ordering", "steps are ordered by their injected current relative to zero (not by file position): 'lowest' = most "
                           "negative, 'smallest' = the last hyperpolarising step before zero, rheobase / latency / kinetics use the "
                           "smallest depolarising step with an AP"),
-        ("Steps used for Rin", f"{pas.rin_n} hyperpolarising steps (dI < -{pp.min_abs_dI} pA, spiking steps "
+        ("Steps used for Rin", f"{pas.rin_n} sweeps: hyperpolarising steps (dI < -{pp.min_abs_dI} pA)"
+                               + (f" plus the 0 pA sweep (|dI| <= {pp.min_abs_dI} pA)" if pp.include_zero else "")
+                               + f" (spiking steps "
                                f"{'excluded' if pp.exclude_spikes else 'kept'}); dI measured from the Im channel"
                                + (f", rounded to the {pp.round_step:.0f} pA protocol step" if pp.round_step else ", not rounded (uneven or unknown step size)")),
         ("Rin method", {"ols": "OLS line of dV on dI (EE manual s.9)", "ransac": "RANSAC line (Scala 2019)",

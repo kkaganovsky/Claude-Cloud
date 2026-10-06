@@ -26,7 +26,8 @@ class PassiveParams:
     baseline_region: Optional[Tuple[float, float]] = None   # explicit region overrides baseline_ms
     measure_region: Optional[Tuple[float, float]] = None
     peak_avg_ms: float = 0.0                    # 0 = raw minimum sample (EE); Allen/Scala averages 5 ms
-    min_abs_dI: float = 1.0                     # pA
+    min_abs_dI: float = 1.0                     # pA; |dI| at or below this = the 0 pA sweep
+    include_zero: bool = True                   # also use the 0 pA sweep (dV ~ 0 point) for Rin; never for tau / sag
     exclude_spikes: bool = True
     spike_threshold: float = 0.0                # mV
     ri_method: str = "ols"                      # 'ols' | 'ransac' | 'median_ratio'
@@ -60,6 +61,7 @@ class SweepPassive:
     sag_ratio: float = np.nan       # EE: sag / (Vpeak - Vbase)
     tolias: float = np.nan          # Scala 'sag ratio': (Vpeak - Vbase) / (Vss - Vbase)
     negative: bool = False
+    zero: bool = False
     spike: bool = False
     used: bool = False
     note: str = ""
@@ -96,6 +98,7 @@ def analyse_passive(t, V, I, p: PassiveParams, sweeps=None) -> PassiveResult:
         if p.round_step:
             r.dI = p.round_step * round(r.dI / p.round_step)
         r.negative = r.dI < -p.min_abs_dI
+        r.zero = abs(r.dI) <= p.min_abs_dI
         i0, i1 = idx_at(t, a), idx_at(t, b)
         seg = v[i0:i1 + 1]
         r.spike = bool(seg.max() > p.spike_threshold)
@@ -110,8 +113,8 @@ def analyse_passive(t, V, I, p: PassiveParams, sweeps=None) -> PassiveResult:
             r.sag_mV = r.v_peak - r.v_ss
             r.sag_ratio = r.sag_mV / (r.v_peak - r.v_base) if r.v_peak != r.v_base else np.nan
             r.tolias = (r.v_peak - r.v_base) / (r.v_ss - r.v_base) if r.v_ss != r.v_base else np.nan
-        r.used = s in sweeps and r.negative
-        if s in sweeps and not r.negative:
+        r.used = s in sweeps and (r.negative or (p.include_zero and r.zero))
+        if s in sweeps and not r.used:
             r.note = "not hyperpolarizing"
         if r.used and p.exclude_spikes and r.spike:
             r.used, r.note = False, "spikes"
@@ -120,25 +123,29 @@ def analyse_passive(t, V, I, p: PassiveParams, sweeps=None) -> PassiveResult:
     res = PassiveResult(out)
     if not used:
         return res
-    by_dI = sorted(used, key=lambda r: r.dI)              # most negative first
-    res.lowest, res.smallest = by_dI[0], by_dI[-1]
-    ri_set = by_dI[:p.ri_n] if p.ri_n else by_dI
+    neg = sorted([r for r in used if r.negative], key=lambda r: r.dI)   # most negative first
+    if not neg:
+        return res
+    res.lowest, res.smallest = neg[0], neg[-1]
+    zero = [r for r in used if r.zero]
+    ri_set = (neg[:p.ri_n] if p.ri_n else neg) + zero
     x = np.array([r.dI for r in ri_set]) / 1e3
     y = np.array([r.dV for r in ri_set])
     res.rin_n = len(ri_set)
     if len(ri_set) == 1:
         res.rin = float(y[0] / x[0])
-    elif p.ri_method == "median_ratio":
-        res.rin = float(np.median(y / x))
+    elif p.ri_method == "median_ratio":            # dV/dI per step: the 0 pA sweep has no ratio
+        nz = x != 0
+        res.rin = float(np.median(y[nz] / x[nz]))
     elif p.ri_method == "ransac":
         m, c, _ = robust_line_ransac(x, y)
         res.rin, res.rin_intercept = m, c
     else:
         lr = stats.linregress(x, y)
         res.rin, res.rin_intercept, res.rin_r2 = float(lr.slope), float(lr.intercept), float(lr.rvalue ** 2)
-    tau_sweeps = [res.smallest] if p.tau_source == "smallest" else used
+    tau_sweeps = [res.smallest] if p.tau_source == "smallest" else neg
     taus = []
-    for r in used:
+    for r in neg:
         w = _fit_window(t, V[r.idx], r, p)
         r.fit_window = w
         m = (t >= w[0]) & (t <= w[1])

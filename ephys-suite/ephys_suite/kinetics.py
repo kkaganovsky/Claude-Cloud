@@ -20,7 +20,7 @@ THRESHOLD_METHODS = ("first_deriv", "third_deriv", "method_I", "method_II", "lea
 @dataclass
 class KineticsParams:
     thr_method: str = "method_II"
-    thr_search: float = 5.0              # ms before the peak
+    thr_search: float = 10.0             # ms before the peak (Easy Electrophysiology setting used in the lab)
     first_deriv_cutoff_mode: str = "max" # 'max' | 'cutoff' (first_deriv)
     first_deriv_cutoff: float = 20.0     # mV/ms
     third_deriv_cutoff_mode: str = "max"
@@ -71,6 +71,10 @@ def _derivs(v, start, peak):
 
 def threshold_index(v, dt, start, peak, p: KineticsParams):
     """Index (absolute) of the AP threshold, or None."""
+    # Single precision, as in Easy Electrophysiology. ABF voltages come in fixed ADC steps (~0.03 mV), so the
+    # derivative-based scores (Method II especially) often tie exactly between two samples; which one wins then
+    # depends only on rounding. Rounding the trace to float32 first reproduces EE's choice in every case checked.
+    v = np.asarray(v, dtype=np.float32).astype(np.float64)
     fd = np.diff(v) / dt
     calc = fd[start:peak + 2]
     f1 = calc[:-2]

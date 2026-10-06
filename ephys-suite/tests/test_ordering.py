@@ -49,3 +49,13 @@ def test_rheobase_scala_sorts_by_current():
     cnt = np.array([9, 0, 1, 6, 0, 0, 3.0])
     rheo, info = S.rheobase_scala(cnt, cur, 1.0)
     assert info["first_supra"] == 150 and rheo <= 150
+
+
+def test_sibling_abfs_natural_order():
+    import os, tempfile
+    from ephys_suite.io import sibling_abfs
+    d = tempfile.mkdtemp()
+    for n in ("cell10.abf", "cell2.abf", "cell1.ABF", "notes.txt", ".hidden.abf", "26424030.abf"):
+        open(os.path.join(d, n), "w").close()
+    got = [os.path.basename(p) for p in sibling_abfs(os.path.join(d, "cell2.abf"))]
+    assert got == ["26424030.abf", "cell1.ABF", "cell2.abf", "cell10.abf"]

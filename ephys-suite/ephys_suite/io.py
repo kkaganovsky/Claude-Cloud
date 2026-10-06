@@ -1,4 +1,5 @@
 """ABF loading into a unit-normalised Recording: time ms, voltage mV, current pA."""
+import os
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -76,3 +77,12 @@ def load_abf(path: str) -> Recording:
         cmd = None
     starts = np.array([s * abf.sweepIntervalSec * 1e3 for s in range(abf.sweepCount)])
     return Recording(path, t, chans, outu, list(abf.adcNames), starts, cmd, cu, float(abf.dataRate))
+
+
+def sibling_abfs(path: str) -> List[str]:
+    """All .abf files in the folder of `path`, in natural name order (2 before 10)."""
+    import re
+    d = os.path.dirname(os.path.abspath(path))
+    key = lambda n: [int(x) if x.isdigit() else x.lower() for x in re.split(r"(\d+)", n)]
+    names = sorted((n for n in os.listdir(d) if n.lower().endswith(".abf") and not n.startswith(".")), key=key)
+    return [os.path.join(d, n) for n in names]

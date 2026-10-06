@@ -17,6 +17,15 @@ pytest
 | Events | Template (biexponential, rise 0.5 / decay 5 ms default) detection by **deconvolution** (Pernia-Andrade 2012; the "convolution method"), correlation and detection criterion (Clements & Bekkers 1997 sliding window), or thresholding. Lower threshold (linear / RMS / polynomial curve), upper threshold, amplitude threshold, local-maximum period, omit period, peak smoothing; per-event baseline + foot, amplitude, 10-90 rise, decay % (37), mono-exponential tau, FWHM, AUC, inter-event interval; average event overlay, cumulative probability, KS test; CSV export. |
 | Cell summary | One spreadsheet row in the project's column layout (`report.COLUMNS`) plus a printed list of every decision made. |
 
+## Moving through a folder and switching the AP threshold method
+- **Previous / Next file** (toolbar, or Ctrl+[ / Ctrl+]) opens the neighbouring `.abf` in the same folder (natural name
+  order); the toolbar shows "3 / 7: name". The Open dialog starts in the last folder used.
+- **AP counting and kinetics tab**: buttons **1 Method II** / **2 Leading inflection** (keys 1 / 2) switch the threshold
+  method. Both candidate thresholds are always drawn on the first-AP plot (square = Method II, diamond = leading
+  inflection; the active one is outlined) and listed with their amplitude and half-width, so the two can be compared
+  at a glance. Every new file starts on Method II. **F** jumps to the first spiking sweep (opened by default);
+  **Copy** (key C) copies `file, sweep, threshold, amplitude, half-width, method` (tab-separated) for a spreadsheet.
+
 ## Editing events (Events tab)
 
 The tab shows an edit toolbar, a view toolbar and a one-line hint that always tells you the next step.
@@ -80,8 +89,11 @@ defaults (current commit):
 
 *Defaults I chose (not documented by EE or recovered from your numbers) - please check:*
 - AP detection: amplitude 30 mV, +dV/dt 20 mV/ms, -dV/dt -10 mV/ms, width 2 ms; amplitude = peak minus Vm at the +dV/dt crossing.
-  Threshold search 5 ms before the peak.
+  Threshold search 10 ms before the peak (matches the lab's Easy Electrophysiology setting; e.g. 26424012 threshold -35.1257 mV, amplitude 46.5088 mV, identical to EE. With 5 ms some cells differ by 0.1-8 mV).
 - Passive windows: baseline = 100 ms before the step, steady state = last 100 ms of the step (Scala et al. 2019 Methods).
+- **Rin also uses the 0 pA sweep** (|dI| <= 1 pA, dV ~ 0) by default ("Also use the 0 pA sweep"); it is never used for tau or
+  sag. With two-step protocols (-40 / -20 pA) the OLS line otherwise passes exactly through two points. The cell-7 reproduction
+  test switches it off, because the reference Rin was made from the hyperpolarising steps only (with it on: Rin 29.45 MOhm).
 - Currents for Rin are measured from the Im channel and **rounded to the protocol step** (estimated as 100 pA), emulating EE's
   "Round Im injections"; with rounded currents *some* region choices give exactly 28.3092 MOhm, with measured currents none did.
 - tau: mono-exponential, step onset -> step end (whole current injection), b0 free, **smallest** hyperpolarising step only

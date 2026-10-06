@@ -6,7 +6,7 @@ import sys
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
 from . import events as E
@@ -15,7 +15,7 @@ from . import passive as P
 from . import report as R
 from . import spikes as S
 from .common import idx_at, ts_ms, window_mean
-from .io import load_abf
+from .io import load_abf, sibling_abfs
 
 pg.setConfigOptions(antialias=False, background="w", foreground="k")
 BLUE, RED, GREEN, GREY = (50, 90, 220), (220, 30, 30), (40, 160, 70), (170, 170, 170)
@@ -176,6 +176,8 @@ class PassiveTab(QtWidgets.QWidget):
             ("ri_method", "Method", "choice", dict(items=["ols", "ransac", "median_ratio"],
                                                   tip="ols = EE manual; ransac / median_ratio = Scala et al. 2019")),
             ("ri_n", "Use n most negative steps (0 = all)", "int", dict(lo=0, hi=100)),
+            ("include_zero", "Also use the 0 pA sweep", "bool",
+             dict(tip="The sweep with no step (dV ~ 0) is added to the Rin fit; never used for tau or sag")),
         ])
         self.form3 = ParamForm("tau / Cm (Cm = tau / Rin)", self.p, [
             ("tau_source", "tau from", "choice", dict(items=["smallest", "all"])),
@@ -272,7 +274,7 @@ class PassiveTab(QtWidgets.QWidget):
             + "<br><span style='color:#777'>Cm assumes an isopotential cell (Golowasch et al. 2009).</span>")
         rows = [(s.idx, s.dI, s.dV, s.v_peak, s.sag_mV, s.sag_ratio, s.tolias, s.fit["tau"] if s.fit and s.fit["ok"] else None,
                  s.fit["r2"] if s.fit and s.fit["ok"] else None,
-                 ("used, tau" if s.tau_used else "used") if s.used else (s.note or "")) for s in r.sweeps]
+                 ("used, tau" if s.tau_used else ("used (0 pA)" if s.zero else "used")) if s.used else (s.note or "")) for s in r.sweeps]
         fill(self.tbl, rows, [not s.used for s in r.sweeps])
 
 
@@ -331,8 +333,46 @@ class SpikesTab(QtWidgets.QWidget):
         v = QtWidgets.QVBoxLayout()
         self.spin = QtWidgets.QSpinBox()
         self.spin.valueChanged.connect(self.redraw)
-        v.addWidget(QtWidgets.QLabel("Sweep"))
-        v.addWidget(self.spin)
+        row = QtWidgets.QHBoxLayout()
+        row.addWidget(QtWidgets.QLabel("Sweep"))
+        row.addWidget(self.spin)
+        b = QtWidgets.QPushButton("First spiking sweep")
+        b.setToolTip("Jump to the smallest depolarising step with an AP (F)")
+        b.clicked.connect(self.goto_first_spiking)
+        row.addWidget(b)
+        v.addLayout(row)
+        g = QtWidgets.QGroupBox("Threshold method (1 / 2)")
+        gl = QtWidgets.QHBoxLayout(g)
+        self.thr_buttons = {}
+        self.thr_group = QtWidgets.QButtonGroup(self)
+        for key, label, col in (("method_II", "1  Method II", "#e07b00"), ("leading_inflection", "2  Leading inflection", "#1f9a46")):
+            tb = QtWidgets.QToolButton()
+            tb.setText(label)
+            tb.setCheckable(True)
+            tb.setStyleSheet("QToolButton{padding:3px 8px;border:1px solid #b5b5b5;border-radius:3px;}"
+                             f"QToolButton:checked{{background:{col};color:white;font-weight:bold;}}")
+            tb.clicked.connect(lambda _=False, k=key: self.set_thr_method(k))
+            self.thr_group.addButton(tb)
+            self.thr_buttons[key] = tb
+            gl.addWidget(tb)
+        self.thr_buttons["method_II"].setChecked(True)
+        v.addWidget(g)
+        crow = QtWidgets.QHBoxLayout()
+        self.copy_edit = QtWidgets.QLineEdit()
+        self.copy_edit.setReadOnly(True)
+        self.copy_edit.setToolTip("file, sweep, threshold (mV), amplitude (mV), half-width (ms), method - tab-separated")
+        bc = QtWidgets.QPushButton("Copy")
+        bc.setToolTip("Copy file, sweep, threshold, amplitude, half-width and method (tab-separated, C)")
+        bc.clicked.connect(self.copy_row)
+        crow.addWidget(self.copy_edit, 1)
+        crow.addWidget(bc)
+        v.addLayout(crow)
+        from PySide6.QtGui import QKeySequence, QShortcut
+        for key, fn in (("1", lambda: self.set_thr_method("method_II")), ("2", lambda: self.set_thr_method("leading_inflection")),
+                        ("F", self.goto_first_spiking), ("C", self.copy_row)):
+            q = QShortcut(QKeySequence(key), self)
+            q.setContext(Qt.WidgetWithChildrenShortcut)
+            q.activated.connect(lambda fn=fn: None if EventsTab._typing() else fn())
         self.lbl = QtWidgets.QLabel()
         self.lbl.setWordWrap(True)
         self.lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -355,7 +395,33 @@ class SpikesTab(QtWidgets.QWidget):
 
     def set_recording(self, rec):
         self.spin.setRange(0, rec.n_sweeps - 1)
+        self.set_thr_method("method_II", redraw=False)     # every new file starts on Method II
         self.recompute()
+        self.goto_first_spiking()
+
+    def set_thr_method(self, key, redraw=True):
+        self.kp.thr_method = key
+        self.thr_buttons.get(key, self.thr_buttons["method_II"]).setChecked(key in self.thr_buttons)
+        self.f2.load()
+        if redraw:
+            self.redraw()
+
+    def first_spiking_sweep(self):
+        if not self.per or not hasattr(self, "dI"):
+            return None
+        return next((s for s in S.order_from_zero(self.dI) if self.per[s]), None)
+
+    def goto_first_spiking(self):
+        s = self.first_spiking_sweep()
+        if s is not None:
+            self.spin.setValue(s)
+            self.redraw()
+
+    def copy_row(self):
+        txt = self.copy_edit.text()
+        if txt:
+            QtGui.QGuiApplication.clipboard().setText(txt)
+            self.main.statusBar().showMessage("Copied: " + txt.replace("\t", "  |  "), 4000)
 
     def recompute(self):
         rec = self.main.rec
@@ -382,8 +448,15 @@ class SpikesTab(QtWidgets.QWidget):
         self.lbl.setText(txt)
         self.redraw()
 
+    def _sync_thr_buttons(self):
+        self.thr_group.setExclusive(False)
+        for k, b in self.thr_buttons.items():
+            b.setChecked(k == self.kp.thr_method)
+        self.thr_group.setExclusive(True)
+
     def redraw(self, *_):
         rec = self.main.rec
+        self._sync_thr_buttons()
         if rec is None or not self.per:
             return
         s = self.spin.value()
@@ -397,10 +470,14 @@ class SpikesTab(QtWidgets.QWidget):
             self.pv.addItem(pg.InfiniteLine(self.thr_line, angle=0, pen=pg.mkPen(RED, style=Qt.DashLine)))
         self.pap.clear()
         self.pph.clear()
+        self.copy_edit.setText("")
         if not sps:
             self.lbl.setText(self.lbl.text().split("<br>Sweep")[0] + f"<br>Sweep {s}: no APs")
             return
         k = K.analyse_ap(t, v, sps[0].peak_idx, self.kp)
+        # both candidate thresholds, so the two methods can be compared at a glance
+        alt = {m: K.analyse_ap(t, v, sps[0].peak_idx, dataclasses.replace(self.kp, thr_method=m))
+               for m in ("method_II", "leading_inflection")}
         base = self.lbl.text().split("<br>Sweep")[0]
         if not k.ok:
             self.lbl.setText(base + f"<br>Sweep {s}: {len(sps)} APs; kinetics failed: {k.why}")
@@ -413,9 +490,26 @@ class SpikesTab(QtWidgets.QWidget):
         self.pap.plot([m["rise"][0], m["rise"][1]], [m["rise"][2], m["rise"][3]], pen=None, symbol="+", symbolBrush=(150, 0, 200), symbolSize=12)
         self.pap.plot([m["decay"][0], m["decay"][1]], [m["decay"][2], m["decay"][3]], pen=None, symbol="+", symbolBrush=BLUE, symbolSize=12)
         self.pap.plot([m["half"][0], m["half"][1]], [m["half"][2]] * 2, pen=pg.mkPen((230, 170, 0), width=2))
+        names = {"method_II": "Method II", "leading_inflection": "Leading infl."}
+        cols = {"method_II": (224, 123, 0), "leading_inflection": (31, 154, 70)}
+        cmp_txt = ""
+        for m, a in alt.items():
+            if a.ok:
+                act = m == self.kp.thr_method
+                self.pap.plot([a.thr_t], [a.thr_v], pen=None, symbol="s" if m == "method_II" else "d",
+                              symbolBrush=cols[m], symbolPen=pg.mkPen("k" if act else cols[m], width=2 if act else 1),
+                              symbolSize=13 if act else 9)
+                line = (f"{names[m]}: thr {a.thr_v:.2f}, amp {a.amplitude:.2f}, FWHM {a.half_width_ms:.3f} "
+                        f"({k.peak_t - a.thr_t:.1f} ms before peak)")
+                cmp_txt += "<br>" + (f"<b>&#9654; {line}</b>" if act else f"&nbsp;&nbsp;{line}")
+                self.pph.addItem(pg.InfiniteLine(a.thr_v, angle=90, pen=pg.mkPen(cols[m], width=2 if act else 1,
+                                                                                  style=Qt.SolidLine if act else Qt.DashLine)))
+        fname = os.path.basename(getattr(rec, "path", "") or "")
+        self.copy_edit.setText("\t".join([fname, str(s), f"{k.thr_v:.4f}", f"{k.amplitude:.4f}", f"{k.half_width_ms:.4f}",
+                                           names.get(self.kp.thr_method, self.kp.thr_method)]))
         x, y = K.phase_plot(t, v, k.peak_idx)
         self.pph.plot(x, y, pen=pg.mkPen(BLUE))
-        self.lbl.setText(base + f"<br><b>Sweep {s}</b>: {len(sps)} APs, first AP:<br>thr {k.thr_v:.3f} mV, amp {k.amplitude:.3f} mV,"
+        self.lbl.setText(base + f"<br><b>Sweep {s}</b>: {len(sps)} APs, first AP{cmp_txt}<br>active: thr {k.thr_v:.3f} mV, amp {k.amplitude:.3f} mV,"
                          f"<br>rise {k.rise_ms:.3f}, decay {k.decay_ms:.3f}, FWHM {k.half_width_ms:.3f} ms,"
                          f"<br>fAHP {k.fahp:.3f}, mAHP {k.mahp:.3f} mV")
 
@@ -1276,11 +1370,48 @@ class MainWindow(QtWidgets.QMainWindow):
         a = m.addAction("&Open .abf…")
         a.setShortcut("Ctrl+O")
         a.triggered.connect(self.open_dialog)
-        self.statusBar().showMessage("File > Open (Ctrl+O)")
+        a = m.addAction("&Previous file in folder")
+        a.setShortcut("Ctrl+[")
+        a.triggered.connect(lambda: self.step_file(-1))
+        a = m.addAction("&Next file in folder")
+        a.setShortcut("Ctrl+]")
+        a.triggered.connect(lambda: self.step_file(+1))
+        tb = self.addToolBar("Files")
+        tb.setMovable(False)
+        self.act_prev = tb.addAction("\u25c0 Previous file", lambda: self.step_file(-1))
+        self.act_next = tb.addAction("Next file \u25b6", lambda: self.step_file(+1))
+        self.lbl_pos = QtWidgets.QLabel("  no file")
+        tb.addWidget(self.lbl_pos)
+        self.act_prev.setToolTip("Previous .abf in this folder (Ctrl+[)")
+        self.act_next.setToolTip("Next .abf in this folder (Ctrl+])")
+        self.settings = QtCore.QSettings("ephys-suite", "ephys-suite")
+        self.path = None
+        self._update_nav()
+        self.statusBar().showMessage("File > Open (Ctrl+O); then Ctrl+] / Ctrl+[ for the next / previous file in the folder")
         self._step_busy = False
 
+    def _update_nav(self):
+        files = sibling_abfs(self.path) if self.path else []
+        i = files.index(os.path.abspath(self.path)) if self.path and os.path.abspath(self.path) in files else -1
+        self.act_prev.setEnabled(i > 0)
+        self.act_next.setEnabled(0 <= i < len(files) - 1)
+        self.lbl_pos.setText(f"  {i + 1} / {len(files)}:  {os.path.basename(self.path)}" if i >= 0 else "  no file")
+
+    def step_file(self, d):
+        if not self.path:
+            return
+        files = sibling_abfs(self.path)
+        p = os.path.abspath(self.path)
+        if p not in files:
+            return
+        j = files.index(p) + d
+        if 0 <= j < len(files):
+            self.load(files[j])
+
     def open_dialog(self):
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Open ABF", "", "Axon ABF (*.abf);;All files (*)")
+        d = self.settings.value("last_dir", "", type=str)
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Open ABF", d if d and os.path.isdir(d) else os.path.expanduser("~"),
+                                                        "Axon ABF (*.abf);;All files (*)")
         if path:
             self.load(path)
 
@@ -1291,6 +1422,9 @@ class MainWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "Could not load file", f"{path}\n\n{e}")
             return
         self.rec = rec
+        self.path = path
+        self.settings.setValue("last_dir", os.path.dirname(os.path.abspath(path)))
+        self._update_nav()
         self.setWindowTitle(f"ephys-suite: {os.path.basename(path)}")
         has_cc = rec.vm() is not None and rec.im() is not None
         self.events.set_recording(rec)

@@ -220,7 +220,7 @@ def test_passive_methods_agree_and_ri_n():
     base = P.analyse_passive(t, V, I, P.PassiveParams(step=(200, 1200))).rin
     for m in ("ransac", "median_ratio"):
         assert P.analyse_passive(t, V, I, P.PassiveParams(step=(200, 1200), ri_method=m)).rin == pytest.approx(base, rel=1e-2)
-    assert P.analyse_passive(t, V, I, P.PassiveParams(step=(200, 1200), ri_n=2)).rin_n == 2
+    assert P.analyse_passive(t, V, I, P.PassiveParams(step=(200, 1200), ri_n=2)).rin_n == 3     # + the 0 pA sweep
 
 
 def test_sag_definitions():
@@ -242,3 +242,17 @@ def test_rounding_to_protocol_step():
     I = I * 1.007
     r = P.analyse_passive(t, V, I, P.PassiveParams(step=(200, 1200), round_step=25.0))
     assert r.lowest.dI == -100
+
+
+def test_passive_zero_sweep_option():
+    t, V, I = make_family()                      # -100..-25, 0, +25
+    r = P.analyse_passive(t, V, I, P.PassiveParams(step=(200, 1200)))
+    assert r.rin_n == 5 and r.rin == pytest.approx(RIN, rel=5e-3)
+    z = r.sweeps[4]
+    assert z.zero and z.used and not z.tau_used and z.fit is None
+    assert r.smallest.dI == pytest.approx(-25)           # tau sweep is still the last hyperpolarising step
+    assert P.analyse_passive(t, V, I, P.PassiveParams(step=(200, 1200), ri_method="median_ratio")).rin == pytest.approx(RIN, rel=5e-3)
+    r2 = P.analyse_passive(t, V, I, P.PassiveParams(step=(200, 1200), include_zero=False))
+    assert r2.rin_n == 4 and not r2.sweeps[4].used
+    r3 = P.analyse_passive(t, V, I, P.PassiveParams(step=(200, 1200), ri_n=2))
+    assert r3.rin_n == 3                                 # 2 most negative + 0 pA

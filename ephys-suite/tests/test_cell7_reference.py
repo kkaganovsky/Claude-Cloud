@@ -4,7 +4,8 @@ Exact matches are asserted for everything recoverable from the data; the passive
 in Easy Electrophysiology that cannot be recovered, so only close agreement is asserted (see README: DECISIONS)."""
 import pytest
 
-from ephys_suite.report import build_cell_report
+from ephys_suite.io import load_abf
+from ephys_suite.report import build_cell_report, make_config
 
 EXACT = {"Max AP": 80, "Adaptation": 0.59235669, "Rheobase (pA)": 401.549931, "Amplitude (mV)": 78.6865234,
          "Threshold (mV)": -47.503662, "Corr Threshold": -57.183662, "Rise Time (ms)": 0.325, "Decay Time (ms)": 0.855,
@@ -17,7 +18,11 @@ CLOSE = {"steady state change in Voltage (sag)": (-14.633664, 0.1), "Input Resis
 
 @pytest.fixture(scope="module")
 def rep(cell7_dir):
-    return build_cell_report(cell7_dir + "IO.abf", spont_path=cell7_dir + "spontanous?.abf")
+    # The reference row's Rin was made in Easy Electrophysiology from the hyperpolarising steps only, so the 0 pA sweep
+    # (on by default in the suite) is switched off to reproduce it. With it on: Rin 29.45 MOhm, Cm 718 pF.
+    cfg = make_config(load_abf(cell7_dir + "IO.abf"))
+    cfg.passive.include_zero = False
+    return build_cell_report(cell7_dir + "IO.abf", cfg, spont_path=cell7_dir + "spontanous?.abf")
 
 
 @pytest.mark.parametrize("col,val", list(EXACT.items()))
