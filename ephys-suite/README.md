@@ -17,6 +17,12 @@ pytest
 | Events | Template (biexponential, rise 0.5 / decay 5 ms default) detection by **deconvolution** (Pernia-Andrade 2012; the "convolution method"), correlation and detection criterion (Clements & Bekkers 1997 sliding window), or thresholding. Lower threshold (linear / RMS / polynomial curve), upper threshold, amplitude threshold, local-maximum period, omit period, peak smoothing; per-event baseline + foot, amplitude, 10-90 rise, decay % (37), mono-exponential tau, FWHM, AUC, inter-event interval; average event overlay, cumulative probability, KS test; CSV export. |
 | Cell summary | One spreadsheet row in the project's column layout (`report.COLUMNS`) plus a printed list of every decision made. |
 
+## Spike counting rule
+Threshold-line crossings closer than 3 ms are one AP, and an AP counts only if its peak is at least **20 mV above the
+lowest Vm since the previous AP** (lab rule, adjustable in the AP tab: "Min. rise above preceding trough"). This
+rejects noise on depolarisation-block plateaus. It also rejects real APs that have shrunk below 20 mV late in strong
+steps (e.g. 26507006 at +140 to +170 pA), so cells like that are undercounted at high current.
+
 ## Moving through a folder and switching the AP threshold method
 - **Previous / Next file** (toolbar, or Ctrl+[ / Ctrl+]) opens the neighbouring `.abf` in the same folder (natural name
   order); the toolbar shows "3 / 7: name". The Open dialog starts in the last folder used.

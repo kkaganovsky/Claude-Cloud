@@ -297,6 +297,9 @@ class SpikesTab(QtWidgets.QWidget):
             ("neg_dvdt", "-dV/dt", "float", dict(suffix="mV/ms")),
             ("width", "Width", "float", dict(suffix="ms", dec=2)),
             ("manual_threshold", "Manual threshold", "float", dict(suffix="mV")),
+            ("min_prominence", "Min. rise above preceding trough", "float",
+             dict(suffix="mV", lo=0, tip="An AP must rise this far above the lowest Vm since the previous AP (lab rule: 20 mV; 0 = off)")),
+            ("merge_ms", "Merge crossings closer than", "float", dict(suffix="ms", lo=0)),
         ])
         self.f2 = ParamForm("AP kinetics (EE manual s.10)", self.kp, [
             ("thr_method", "Threshold method", "choice", dict(items=list(K.THRESHOLD_METHODS))),

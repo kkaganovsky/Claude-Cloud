@@ -59,3 +59,17 @@ def test_sibling_abfs_natural_order():
         open(os.path.join(d, n), "w").close()
     got = [os.path.basename(p) for p in sibling_abfs(os.path.join(d, "cell2.abf"))]
     assert got == ["26424030.abf", "cell1.ABF", "cell2.abf", "cell10.abf"]
+
+
+def test_prominence_rule_rejects_plateau_noise_and_merges_double_crossings():
+    import numpy as np
+    from ephys_suite.spikes import SpikeParams, detect_threshold, prominence_filter
+    t = np.arange(0, 400, 0.02)
+    v = np.where(t < 75, -60.0, -15.0)                       # rest, then depolarised by the step
+    v = v + 70 * np.exp(-((t - 50) / 0.5) ** 2)              # AP 1 from rest (+10 mV)
+    v = v + 35 * np.exp(-((t - 100) / 0.5) ** 2)             # AP 2 from -15 mV (+20 mV, 35 mV above its trough)
+    m = t > 150
+    v[m] = 0.0 + 1.5 * np.sin(t[m] * 3)                      # depolarisation block near 0 mV with noise
+    raw = detect_threshold(t, v, 0.5, (0, 400))              # noise crosses the line many times
+    kept = prominence_filter(t, v, raw, SpikeParams(window=(0.0, 400.0)))
+    assert len(raw) > 20 and [round(s.peak_t) for s in kept] == [50, 100]

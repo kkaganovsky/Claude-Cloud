@@ -28,6 +28,10 @@ class SpikeParams:
     width: float = 2.0                # ms to find the negative dV/dt after the positive crossing
     manual_threshold: float = 0.0     # mV
     window: Tuple[float, float] = (0.0, 1e12)   # ms, region searched (default: whole sweep; set to the step)
+    min_prominence: float = 20.0      # mV; an AP must rise this far above the lowest Vm since the previous AP
+                                      # (or since the window start). Rejects noise on depolarisation-block
+                                      # plateaus. Lab rule (not from EE). 0 = off.
+    merge_ms: float = 3.0             # crossings closer than this are one AP (a peak hovering at the threshold line)
 
 
 @dataclass
@@ -95,8 +99,34 @@ def detect_all(t, V, p: SpikeParams, sweeps: Optional[Sequence[int]] = None):
         thr = float(np.median(mids)) if mids else None
     if thr is not None:
         per = {s: detect_threshold(t, V[s], thr, p.window, s) for s in sweeps}
+    per = {s: prominence_filter(t, V[s], lst, p) for s, lst in per.items()}
     out = [per.get(s, []) for s in range(V.shape[0])]
     return out, thr
+
+
+def prominence_filter(t, v, spikes: List[Spike], p: SpikeParams) -> List[Spike]:
+    """Merge crossings closer than p.merge_ms (keep the higher peak), then keep only APs whose peak is at least
+    p.min_prominence mV above the lowest Vm since the previous kept-or-rejected AP (or since the window start)."""
+    if not spikes:
+        return spikes
+    dt = float(t[1] - t[0])
+    merged = []
+    for sp in spikes:
+        if merged and p.merge_ms > 0 and (sp.peak_idx - merged[-1].peak_idx) * dt < p.merge_ms:
+            if sp.peak_v > merged[-1].peak_v:
+                merged[-1] = sp
+        else:
+            merged.append(sp)
+    if not p.min_prominence:
+        return merged
+    prev = idx_at(t, p.window[0]) if p.window[0] > t[0] else 0
+    prev = min(prev, merged[0].peak_idx)
+    out = []
+    for sp in merged:
+        if sp.peak_v - float(np.min(v[prev:sp.peak_idx + 1])) >= p.min_prominence:
+            out.append(sp)
+        prev = sp.peak_idx
+    return out
 
 
 # ----------------------------------------------------------------------------------- firing-pattern measures
