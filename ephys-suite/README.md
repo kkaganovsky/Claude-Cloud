@@ -17,6 +17,39 @@ pytest
 | Events | Template (biexponential, rise 0.5 / decay 5 ms default) detection by **deconvolution** (Pernia-Andrade 2012; the "convolution method"), correlation and detection criterion (Clements & Bekkers 1997 sliding window), or thresholding. Lower threshold (linear / RMS / polynomial curve), upper threshold, amplitude threshold, local-maximum period, omit period, peak smoothing; per-event baseline + foot, amplitude, 10-90 rise, decay % (37), mono-exponential tau, FWHM, AUC, inter-event interval; average event overlay, cumulative probability, KS test; CSV export. |
 | Cell summary | One spreadsheet row in the project's column layout (`report.COLUMNS`) plus a printed list of every decision made. |
 
+## Access-resistance QC (sEPSC cells)
+
+Checks that every cell's access (series) resistance is **below 25 MOhm**, replacing `RaRm.m` / `test_pulsePasca.m`.
+
+```
+ephys-suite-qc "/Users/kkaganovsky/Downloads/hFA in vitro 10162026"        # or: python -m ephys_suite.qc "<folder>"
+```
+It prints one line per recording, a verdict per cell, and writes `Ra_QC_<date>.xlsx` (sheets Cells / Files / Sweeps / Settings) into
+the folder (`--out`, `--csv`, `--limit 25`, `--vstep -10`, `--drift 0.2`). Exit code 0 = every cell passes. The same scan is in the GUI
+tab **Access resistance QC** (colored table; click a row to see the detected pulse, the baseline / peak / steady-state windows and Ra
+per sweep, so each detection can be checked by eye).
+
+- **Which files:** EPSC recordings = `.abf` in a folder whose name contains `EPSC` (or with EPSC in the file name); test-pulse
+  recordings = `.abf` in a folder named `CM` (or named like `membrane` / `test pulse`). A file's cell is the folder above its `EPSC` /
+  `CM` folder; the first folder under the chosen root is the line (e.g. `line 14`, `line Q2`). Other `.abf` files (IO, spontaneous...)
+  and Mac `._` / `__MACOSX` files are ignored. Layout problems (an EPSC file with no CM file, several EPSC and CM files in one cell
+  folder, ...) are listed after the table.
+- **Detected, not hard-coded:** the pulse onset / offset come from the recorded command-voltage channel when there is one, otherwise from
+  the two opposite capacitive transients in the current trace (any sampling rate, sweep length, pulse position / duration; sweeps may
+  differ in length). The step size is the measured command step; with no command channel the assumed step (default -10 mV) is used and the
+  report says so (its sign is taken from the direction of the onset transient). If a sweep has no pulse it is reported, not guessed.
+- **Ra, Rm (as in the MATLAB script):** Ra = dV / (I_peak - I_baseline) x 1000, Rm = dV / (I_steady - I_baseline) x 1000 - Ra. Baseline =
+  25 ms before the onset; peak = extreme current within 5 ms after the onset; steady state = 80-90 % into the pulse (the script's
+  20-10 ms before the end of a 100 ms pulse).
+- **Verdict (per recording, then per cell = worst recording):** PASS = Ra mean and every sweep below the limit and a pulse found in every
+  sweep; WARN = some sweeps at / above the limit (mean below) or a pulse missing in some sweeps; FAIL = mean Ra at or above the limit;
+  NO PULSE = nothing measurable. The script's **RaExclude drift rule** (any sweep's Ra >= 120 % or <= 80 % of the first sweep's) is a
+  separate flag (column and line in the summary); it does not change the verdict.
+- **Checked against the MATLAB script** on the example cell's embedded pulse: per-sweep Ra within 2.5 % (10.73 / 12.89 / 13.50 /
+  13.94 vs the script's 10.61 / 12.71 / 13.29 / 13.80 MOhm - the difference is the measured step of -10.10 mV instead of -10 mV; with the step
+  forced to -10 mV the agreement is within 1 %). The same cell's `membrane.abf` (a 10 kHz test-pulse file with no command channel) gives
+  10.4 MOhm.
+
 ## Moving through a folder and switching the AP threshold method
 - **Previous / Next file** (toolbar, or Ctrl+[ / Ctrl+]) opens the neighbouring `.abf` in the same folder (natural name
   order); the toolbar shows "3 / 7: name". The Open dialog starts in the last folder used.
