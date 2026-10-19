@@ -1366,8 +1366,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.spikes = SpikesTab(self)
         self.events = EventsTab(self)
         self.summary = SummaryTab(self)
+        from .gui_qc import QCTab                      # lazy: gui_qc imports helpers from this module
+        self.qc = QCTab(self)
         for w, n in ((self.passive, "Passive (Rin / sag / tau / Cm)"), (self.spikes, "AP counting and kinetics"),
-                     (self.events, "Events"), (self.summary, "Cell summary")):
+                     (self.events, "Events"), (self.summary, "Cell summary"), (self.qc, "Access resistance QC")):
             self.tabs.addTab(w, n)
         m = self.menuBar().addMenu("&File")
         a = m.addAction("&Open .abf…")
