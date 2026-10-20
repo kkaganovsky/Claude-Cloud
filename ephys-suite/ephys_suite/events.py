@@ -597,6 +597,7 @@ class EventSession:
         self.events: List[Event] = []
         self._undo: List[EditLog] = []
         self._redo: List[EditLog] = []
+        self.external = False            # True while the event set comes from load_external() instead of detection
 
     # ---------------------------------------------------------------------------------------------- detection
     @property
@@ -604,6 +605,7 @@ class EventSession:
         return ts_ms(self.t)
 
     def detect(self, keep_edits=True):
+        self.external = False
         self.auto = analyse_events(self.t, self.Y, self.p, self.starts)
         if not keep_edits:
             self.log = EditLog()
@@ -611,6 +613,40 @@ class EventSession:
             self._redo.clear()
         self._rebuild()
         return self.auto
+
+    def load_external(self, peaks, keep_edits=False):
+        """Use externally proposed events (e.g. a classifier's) as the 'automatic' event set.
+
+        peaks: iterable of (record, peak_idx). Each is measured like a hand-added event with the thresholds off (the proposer
+        already decided); edits (add / delete / baseline / undo) then work exactly as with detected events. Returns the
+        number of peaks that could be measured."""
+        byrec = {}
+        for r, k in peaks:
+            byrec.setdefault(int(r), []).append(int(k))
+        events = []
+        for r, ks in byrec.items():
+            ks = sorted(set(ks))
+            for j, k in enumerate(ks):
+                prv = ks[j - 1] if j else None
+                nxt = ks[j + 1] if j + 1 < len(ks) else None
+                ev, _ = analyse_event_ex(self.t, self.Y[r], k, prv, nxt, self.p, r, self.starts[r], None, fit_kinetics=True,
+                                         apply_thresholds=False)
+                if ev is None:
+                    ev, _ = analyse_event_ex(self.t, self.Y[r], k, prv, nxt, self.p, r, self.starts[r], None, fit_kinetics=False,
+                                             apply_thresholds=False)
+                if ev is not None:
+                    events.append(ev)
+        total = float(sum(len(self.t) * self.ts for _ in range(self.Y.shape[0])))
+        res = EventResults(events, [None] * self.Y.shape[0], None, self.p, total, None)
+        _finish(res)
+        self.auto = res
+        self.external = True
+        if not keep_edits:
+            self.log = EditLog()
+            self._undo.clear()
+            self._redo.clear()
+        self._rebuild()
+        return len(events)
 
     def _tol(self):
         return max(1, int(round(self.p.min_distance_ms / self.ts)))

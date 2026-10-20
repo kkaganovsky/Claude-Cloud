@@ -10,6 +10,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
 from . import events as E
+from . import model_review as MR
 from . import kinetics as K
 from . import passive as P
 from . import report as R
@@ -552,6 +553,7 @@ class EventsTab(QtWidgets.QWidget):
         self.main = main
         self.p = E.EventParams()
         self.session = None
+        self.review = None              # MR.ReviewState while model events are loaded
         self.sel = None                 # selected (primed) event
         self.pending = None             # (record, peak_idx) waiting for a baseline click, or ('edit', event)
         self.settings = QtCore.QSettings("ephys-suite", "events")
@@ -628,6 +630,36 @@ class EventsTab(QtWidgets.QWidget):
         b3 = QtWidgets.QPushButton("Export events CSV…")
         b3.clicked.connect(self.export_csv)
         sv.addWidget(b3)
+        rg = QtWidgets.QGroupBox("Review model events")
+        rl = QtWidgets.QVBoxLayout(rg)
+        bl = QtWidgets.QPushButton("Load model candidates (CSV)…")
+        bl.setToolTip("Events proposed by the classifier. Accepted ones become the event set; orange rings are borderline candidates "
+                      "you can accept with one click.")
+        bl.clicked.connect(self.load_model_candidates)
+        rl.addWidget(bl)
+        self.lbl_review = QtWidgets.QLabel("No model events loaded.")
+        self.lbl_review.setWordWrap(True)
+        rl.addWidget(self.lbl_review)
+        rr = QtWidgets.QHBoxLayout()
+        for text, tip, fn in (("◀ Prev (Shift+R)", "Previous uncertain candidate", lambda: self.review_next(-1)),
+                              ("Next to review (R) ▶", "Jump to the most uncertain candidate not yet visited", lambda: self.review_next(+1))):
+            b = QtWidgets.QPushButton(text)
+            b.setToolTip(tip)
+            b.clicked.connect(fn)
+            rr.addWidget(b)
+        rl.addLayout(rr)
+        bm = QtWidgets.QPushButton("Mark this record fully reviewed (M)")
+        bm.setToolTip("Only sweeps you mark are used as trusted labels when retraining.")
+        bm.clicked.connect(self.mark_sweep_reviewed)
+        rl.addWidget(bm)
+        self.chk_cands = QtWidgets.QCheckBox("Show not-accepted candidates (orange)")
+        self.chk_cands.setChecked(True)
+        self.chk_cands.toggled.connect(lambda *_: self._markers())
+        rl.addWidget(self.chk_cands)
+        bs = QtWidgets.QPushButton("Save review…")
+        bs.clicked.connect(self.save_review)
+        rl.addWidget(bs)
+        sv.addWidget(rg)
         sv.addStretch(1)
         return scroll(side)
 
@@ -730,7 +762,9 @@ class EventsTab(QtWidgets.QWidget):
         self.sc_end = pg.ScatterPlotItem(size=5, brush=pg.mkBrush(150, 0, 200), pen=pg.mkPen("k"))
         self.sc_sel = pg.ScatterPlotItem(size=16, brush=pg.mkBrush(None), pen=pg.mkPen((0, 90, 255), width=3))
         self.sc_pend = pg.ScatterPlotItem(size=14, brush=pg.mkBrush(255, 150, 0, 160), pen=pg.mkPen("k"))
-        for it in (self.sc_end, self.sc_bl, self.sc_peak, self.sc_sel, self.sc_pend):
+        self.sc_cand = pg.ScatterPlotItem(size=11, brush=pg.mkBrush(None), pen=pg.mkPen((255, 140, 0), width=2))
+        self.sc_rev = pg.ScatterPlotItem(size=24, brush=pg.mkBrush(None), pen=pg.mkPen((255, 140, 0), width=3, style=Qt.DashLine))
+        for it in (self.sc_end, self.sc_bl, self.sc_peak, self.sc_sel, self.sc_pend, self.sc_cand, self.sc_rev):
             it.setZValue(10)
             self.pd.addItem(it)
         self.band = pg.LinearRegionItem(movable=False, brush=pg.mkBrush(255, 150, 0, 50), pen=pg.mkPen((255, 150, 0)))
@@ -798,6 +832,9 @@ class EventsTab(QtWidgets.QWidget):
         sc("Ctrl+Z", lambda: self._undo(True))
         sc("Ctrl+Y", lambda: self._undo(False))
         sc("Esc", self.cancel)
+        sc("R", lambda: self.review_next(+1))
+        sc("Shift+R", lambda: self.review_next(-1))
+        sc("M", self.mark_sweep_reviewed)
 
     @staticmethod
     def _typing():
@@ -834,6 +871,9 @@ class EventsTab(QtWidgets.QWidget):
         if rec is None or self._busy:
             return
         self.sel, self.pending = None, None
+        self.review = None
+        if hasattr(self, "lbl_review"):
+            self.lbl_review.setText("No model events loaded.")
         self.p.direction = int(self.p.direction)
         self.session = E.EventSession(rec.t, rec.ch[self.chan.currentIndex()], self.p, rec.sweep_start_ms)
         self.pd.setLabel("left", rec.units[self.chan.currentIndex()])
@@ -842,6 +882,10 @@ class EventsTab(QtWidgets.QWidget):
 
     def run(self, *_):
         if self.session is None:
+            return
+        if self.session.external and QtWidgets.QMessageBox.question(
+                self, "Replace model events", "The event set currently comes from the model. Run the standard detection and replace it?"
+                " (Your manual edits are kept if 'Keep manual edits' is ticked.)") != QtWidgets.QMessageBox.Yes:
             return
         self.p.direction = int(self.p.direction)
         self.p.omit = ((self.omit_start.value(), self.omit_stop.value()),) if self.omit_stop.value() > self.omit_start.value() else ()
@@ -910,6 +954,14 @@ class EventsTab(QtWidgets.QWidget):
         self.sc_bl.setData([e.bl_t for e in ev], [e.bl_im for e in ev])
         fe = [e for e in ev if e.fitted and e.end_idx >= 0]
         self.sc_end.setData([rec.t[e.end_idx] for e in fe], [y[e.end_idx] for e in fe])
+        cands, cur = [], None
+        if self.review is not None:
+            cands = self.review.candidates_in(self.rec_i, False) if self.chk_cands.isChecked() else []
+            cands = [c for c in cands if self.session.find_event(c.record, c.peak_idx) is None]
+            q = self.review.queue[self.review.pos] if 0 <= self.review.pos < len(self.review.queue) else None
+            cur = q if (q is not None and q.record == self.rec_i) else None
+        self.sc_cand.setData([dict(pos=(rec.t[c.peak_idx], y[c.peak_idx]), data=c) for c in cands])
+        self.sc_rev.setData([rec.t[cur.peak_idx]] if cur else [], [y[cur.peak_idx]] if cur else [])
         sel = self.sel if (self.sel is not None and self.sel.record == self.rec_i) else None
         self.sc_sel.setData([sel.peak_t] if sel else [], [sel.peak_im] if sel else [])
         if self.pending and self.pending[0] != "edit" and self.pending[0] == self.rec_i:
@@ -1111,6 +1163,10 @@ class EventsTab(QtWidgets.QWidget):
                 self.say("Event selected (blue ring). Click it again or press <b>Delete</b> to remove it; <b>B</b> moves its "
                          "baseline; ←/→ steps between events.")
             return True
+        cand = self._hit_cand(x, y, vb)
+        if cand is not None and not self.btn_add.isChecked():
+            self.accept_candidate(cand)
+            return True
         if self.btn_add.isChecked():
             self.add_at(x, None)
             return True
@@ -1269,6 +1325,109 @@ class EventsTab(QtWidgets.QWidget):
             self.sel = None
             self._refresh_all()
             self.say("Undone." if undo else "Redone.")
+
+    # ------------------------------------------------------------------------------------- model review
+    def _hit_cand(self, x, y, vb, radius=12):
+        if self.review is None or not self.chk_cands.isChecked():
+            return None
+        rec = self.main.rec
+        yy = self.session.Y[self.rec_i]
+        dx, dy = self._px(vb)
+        best, bd = None, radius
+        for c in self.review.candidates_in(self.rec_i, False):
+            if self.session.find_event(c.record, c.peak_idx) is not None:
+                continue
+            d = np.hypot((rec.t[c.peak_idx] - x) / dx, (yy[c.peak_idx] - y) / dy)
+            if d < bd:
+                best, bd = c, d
+        return best
+
+    def accept_candidate(self, c):
+        ev, why = self.session.add(c.record, c.peak_idx, fit=True)
+        if ev is None and why not in ("ok", "duplicate"):
+            ev, why = self.session.add(c.record, c.peak_idx, fit=False)
+        if ev is not None:
+            self.sel = ev
+            self._refresh_all()
+            self.say(f"Accepted model candidate (score {c.score:.2f}) at {ev.peak_t:.1f} ms. Ctrl+Z undoes it.", "add")
+        else:
+            self.say(f"Could not add that candidate: {E.REASONS.get(why, why)}.", "warn")
+
+    def _review_label(self):
+        r = self.review
+        if r is None:
+            return
+        n_acc = sum(c.accepted for c in r.cands)
+        self.lbl_review.setText(f"{r.source}: {len(r.cands)} candidates, {n_acc} accepted by the model (threshold {r.thr:.2f}). "
+                                f"Queue {r.pos + 1 if r.pos >= 0 else 0}/{len(r.queue)} (most uncertain first). "
+                                f"Records marked reviewed: {len(r.reviewed)}.")
+
+    def load_model_candidates(self):
+        if self.session is None:
+            self.say("Open a recording first.", "warn")
+            return
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Model candidates", "", "CSV (*.csv)")
+        if path:
+            self.load_candidates_file(path)
+
+    def load_candidates_file(self, path, thr=None):
+        try:
+            st = MR.load_candidates(path, self.session, thr)
+        except Exception as e:                               # noqa: BLE001 - shown to the user
+            self.say(f"Could not read the candidates file: {e}", "warn")
+            return False
+        QtWidgets.QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            n = self.session.load_external([(c.record, c.peak_idx) for c in st.cands if c.accepted])
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+        self.review = st
+        self.sel = None
+        self._load_record(reset_x=False)
+        self._refresh_all()
+        self._review_label()
+        self.say(f"Loaded {n} model events. Click an event twice (or Delete) to remove it, click an orange ring to accept it, "
+                 "<b>R</b> jumps to the next uncertain candidate, <b>M</b> marks a record fully reviewed.")
+        return True
+
+    def review_next(self, d):
+        if self.review is None:
+            self.say("Load model candidates first.", "warn")
+            return
+        c = self.review.step(d)
+        if c is None:
+            return
+        if c.record != self.rec_i:
+            self.spin.setValue(c.record)
+        rec = self.main.rec
+        (x0, x1), _ = self.vb.viewRange()
+        w = x1 - x0
+        self._set_view(max(0.0, rec.t[c.peak_idx] - w / 2), w)
+        if not self.chk_locky.isChecked():
+            self.fit_y()
+        self._markers()
+        self._review_label()
+        now = self.session.find_event(c.record, c.peak_idx) is not None
+        self.say(f"Review {self.review.pos + 1}/{len(self.review.queue)}: model score {c.score:.2f} - " +
+                 ("currently an EVENT (click it twice or press Delete to remove)." if now else
+                  "currently NOT an event (click the orange ring to accept it)."))
+
+    def mark_sweep_reviewed(self):
+        if self.review is None:
+            return
+        self.review.reviewed ^= {self.rec_i}
+        self._review_label()
+        self.say(f"Record {self.rec_i} {'marked' if self.rec_i in self.review.reviewed else 'unmarked'} as fully reviewed.")
+
+    def save_review(self):
+        if self.review is None or self.session is None:
+            self.say("Nothing to save: load model candidates first.", "warn")
+            return
+        base = os.path.splitext(os.path.basename(self.main.rec.path))[0]
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save review", f"{base}_review.csv", "CSV (*.csv)")
+        if path:
+            n, ch = MR.export_review(path, self.session, self.review, os.path.basename(self.main.rec.path), self.main.rec.path)
+            self.say(f"Saved {n} rows ({ch} decisions differ from the model) to {os.path.basename(path)}.")
 
     def export_csv(self):
         if not self.session or not self.session.events:

@@ -160,3 +160,6 @@ The suite follows algorithms from Easy Electrophysiology (GPL-3.0-or-later) and 
 (Allen Institute non-commercial licence). Nothing was copied verbatim; the suite is released as GPL-3.0-or-later. The Allen-derived
 definitions (sag, adaptation index, RANSAC rheobase) are re-implemented from the paper and notebook descriptions. Please confirm the
 licensing is acceptable for your use before redistributing.
+
+## Reviewing classifier-proposed events
+The Events tab can load a candidates CSV from the sEPSC classifier (columns `sweep, time_in_sweep_ms, score, accepted`): accepted candidates become the event set, borderline ones are orange rings you click to accept, **R** steps through the most uncertain candidates, **M** marks a record fully reviewed, and *Save review…* writes the final decisions for retraining (see `model_review.py`).
