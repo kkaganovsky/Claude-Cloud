@@ -240,3 +240,20 @@ def test_ghost_falls_back_to_all_events_until_three_are_verified():
         s.confirm(e)
     g = V.ghost_template(s)
     assert g is not None and g[1].max() == pytest.approx(1.0, abs=0.3)
+
+
+def test_noise_estimate_sees_slow_fluctuations_that_first_differences_miss():
+    rng = np.random.default_rng(3)
+    n = 200000
+    white = rng.normal(0, 1.0, n)
+    # slow (~20 ms) coloured fluctuations of SD ~3 plus a little white noise: what real recordings look like
+    k = np.ones(400) / 400
+    coloured = np.convolve(rng.normal(0, 1, n + 399), k, mode="valid") * 50 + rng.normal(0, 0.8, n)
+    assert V.robust_noise(white, 0.05) == pytest.approx(1.0, rel=0.05)
+    diff_based = 1.4826 * np.median(np.abs(np.diff(coloured) - np.median(np.diff(coloured)))) / np.sqrt(2)
+    assert V.robust_noise(coloured, 0.05) > 2.0 * diff_based
+    drifting = white + np.linspace(0, 200, n)                      # slow drift must not count as noise
+    assert V.robust_noise(drifting, 0.05) == pytest.approx(1.0, rel=0.1)
+    withev = white.copy()
+    withev[1000:1200] -= 80                                          # events do not inflate it
+    assert V.robust_noise(withev, 0.05) == pytest.approx(1.0, rel=0.05)

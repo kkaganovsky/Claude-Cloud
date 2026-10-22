@@ -167,3 +167,16 @@ def test_default_window_is_not_reset_by_the_data(win):
     x0 = ev.vx.value()
     ev.page(+1)
     assert ev.vx.value() == pytest.approx(x0 + 900, abs=1) and ev.rec_i == 0
+
+
+def test_first_view_shows_the_signal_without_any_setup(win):
+    """Regression: the Y range used to start at 0-1, so a freshly opened recording looked empty."""
+    w, ev, t, y = win
+    ev.settings.clear()
+    ev._new_session()
+    med = float(np.median(y))
+    assert ev.vy0.value() < med < ev.vy1.value() and ev.vy1.value() - ev.vy0.value() > 20
+    ev.p.direction = 1                                         # outward events: more room above the baseline
+    ev._new_session()
+    assert ev.vy1.value() - med > med - ev.vy0.value()
+    ev.p.direction = -1

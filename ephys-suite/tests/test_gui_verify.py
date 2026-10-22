@@ -41,6 +41,7 @@ def make_window(tmp_path, app):
     w.events.settings.clear()
     w.events.set_recording(rec)
     w.show()
+    w.tabs.setCurrentWidget(w.events)                        # coverage only counts while the Events tab is on screen
     return w, t, times
 
 
@@ -177,6 +178,8 @@ def test_dismissed_suspects_stay_dismissed(env):
 # ------------------------------------------------------------------------------------------- coverage
 def test_coverage_counts_only_narrow_windows_after_dwell(env):
     w, ev, kit, *_ = env
+    kit.dwell.stop()                                         # the real dwell timer must not race with this test
+    kit.cov.iv = [[] for _ in kit.cov.iv]
     assert kit.cov.fraction() == 0
     ev._set_view(0.0, 7000.0)                                # whole record: too wide to see events
     kit._count_view()
@@ -415,3 +418,23 @@ def test_candidate_without_a_findable_baseline_prompts_for_one(env):
     assert ev.pending is not None and ev.btn_bl.isChecked() and len(ev.session.events) == n
     assert "baseline" in ev.hint.text().lower()
     ev.cancel()
+
+
+def test_nothing_is_counted_or_saved_while_the_events_tab_is_hidden(app, tmp_path):
+    """Regression: opening a file on another tab wrote a review_progress.json next to every recording."""
+    w, t, times = make_window(tmp_path, app)
+    ev, kit = w.events, w.events.kit
+    w.tabs.setCurrentWidget(w.passive)
+    app.processEvents()
+    kit.dwell.stop()
+    ev._set_view(500.0, 1000.0)
+    kit._count_view()
+    assert kit.cov.fraction() == 0
+    kit.autosave()
+    assert not [f for f in os.listdir(tmp_path) if f.endswith(".review_progress.json")]
+    w.tabs.setCurrentWidget(ev)
+    kit._count_view()
+    assert kit.cov.fraction() > 0
+    kit.autosave()                                                # now there is real review activity
+    assert [f for f in os.listdir(tmp_path) if f.endswith(".review_progress.json")]
+    w.close()

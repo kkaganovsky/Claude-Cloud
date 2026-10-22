@@ -98,10 +98,14 @@ class Coverage:
 
 
 # ------------------------------------------------------------------------------------- second opinion finder
-def robust_noise(y) -> float:
-    """Noise SD from the first differences (insensitive to slow drift and to events)."""
-    d = np.diff(np.asarray(y, float))
-    return float(1.4826 * np.median(np.abs(d - np.median(d))) / math.sqrt(2)) or 1e-9
+def robust_noise(y, ts_ms: float = 0.05) -> float:
+    """Noise SD at the time scale of events: the signal minus a 50 ms running mean (removes drift), robust (MAD) so events
+    do not inflate it. First differences were used before, but they only see sample-to-sample noise and under-estimate the
+    background fluctuation by ~3x on real sEPSC recordings, which makes every small deflection look like a strong event."""
+    from scipy.ndimage import uniform_filter1d
+    y = np.asarray(y, float)
+    hp = y - uniform_filter1d(y, size=max(3, int(round(50.0 / ts_ms))), mode="nearest")
+    return float(1.4826 * np.median(np.abs(hp - np.median(hp)))) or 1e-9
 
 
 @dataclass
@@ -121,7 +125,7 @@ def find_suspects(session: E.EventSession, skip: Callable[[int, int], bool], sd:
     p = dataclasses.replace(session.p, method="deconvolution", deconv_sd=sd, lower_mode="none", amplitude_threshold=0.0,
                             fit_decay=False)
     res = E.analyse_events(session.t, session.Y, p, session.starts)
-    noise = [robust_noise(session.Y[r]) for r in range(session.Y.shape[0])]
+    noise = [robust_noise(session.Y[r], session.ts) for r in range(session.Y.shape[0])]
     out = []
     for e in res.events:
         snr = abs(e.amplitude) / noise[e.record]

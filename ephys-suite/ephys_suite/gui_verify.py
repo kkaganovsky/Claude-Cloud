@@ -523,6 +523,7 @@ class VerifyKit(QtCore.QObject):
         self.cov = V.Coverage([s.Y.shape[1] * s.ts] * s.Y.shape[0]) if s is not None else None
         self.suspects, self.queue, self.pos, self.hist = None, [], -1, []
         self.cand_path = None
+        self.lbl_saved.setText("progress is saved automatically")
         self._announced_done.clear()
         if s is not None:
             self.mm.rebuild(s)
@@ -823,8 +824,8 @@ class VerifyKit(QtCore.QObject):
         self.dwell.start(DWELL_MS)
 
     def _count_view(self):
-        if self.cov is None or self.session is None:
-            return
+        if self.cov is None or self.session is None or not self.tab.isVisible():
+            return                                       # only count what the reviewer can actually see (tab on screen)
         (x0, x1), _ = self.tab.vb.viewRange()
         if (x1 - x0) > self.sp_view.value() * 1000.0:
             return
@@ -909,7 +910,7 @@ class VerifyKit(QtCore.QObject):
         if ev is not None and ev.fitted and ev.end_idx >= 0:
             self.zoom.plot([(ev.end_idx - item.peak_idx) * s.ts], [s.Y[item.record][ev.end_idx]], pen=None, symbol="o", symbolSize=6,
                            symbolBrush=pg.mkBrush(150, 0, 200))
-        noise = V.robust_noise(s.Y[item.record])
+        noise = V.robust_noise(s.Y[item.record], s.ts)
         prev = [e for e in s.events if e.record == item.record and e.peak_idx < item.peak_idx]
         gap = (item.peak_idx - prev[-1].peak_idx) * s.ts if prev else float("nan")
         bits = [f"rec {item.record + 1} · {item.peak_idx * s.ts:.1f} ms"]

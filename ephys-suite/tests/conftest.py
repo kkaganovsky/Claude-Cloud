@@ -18,3 +18,9 @@ def cell7_dir(tmp_path_factory):
         z.extractall(out)
     d = glob.glob(os.path.join(out, "cell 7*"))
     return d[0] + "/"
+
+
+@pytest.fixture(autouse=True)
+def _run_in_a_temp_dir(tmp_path, monkeypatch):
+    """Tests that use a bare recording name (e.g. 'synthetic.abf') must not leave autosave files in the repo."""
+    monkeypatch.chdir(tmp_path)

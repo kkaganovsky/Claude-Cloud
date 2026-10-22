@@ -3,3 +3,5 @@ __pycache__/
 .pytest_cache/
 build/
 dist/
+*.review_progress.json
+*.review_progress.json.tmp

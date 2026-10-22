@@ -936,7 +936,16 @@ class EventsTab(QtWidgets.QWidget):
             self.pm.addItem(pg.InfiniteLine(self.session.auto.threshold, angle=0, pen=pg.mkPen(RED)))
         if reset_x:
             w = self.vw.value() if self.vw.value() > 1 else 1000.0
-            self._set_view(0.0, w)
+            self._set_view(0.0, w, self._default_y())          # a remembered view (if any) is applied afterwards
+
+    def _default_y(self):
+        """Sensible first Y range from the data, robust to a test pulse / big artefacts: median -15 / +8 robust SDs on the
+        side events point to (the other way round for outward events)."""
+        y = self.session.Y[self.rec_i]
+        med = float(np.median(y))
+        sd = 1.4826 * float(np.median(np.abs(y - med))) or 1.0
+        inward = int(self.p.direction) < 0
+        return (med - 15 * sd, med + 8 * sd) if inward else (med - 8 * sd, med + 15 * sd)
 
     def _record_events(self):
         return [e for e in (self.session.events if self.session else []) if e.record == self.rec_i]
