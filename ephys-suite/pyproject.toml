@@ -12,10 +12,12 @@ dependencies = ["numpy", "scipy", "pyabf", "pyqtgraph", "PySide6", "openpyxl"]
 
 [project.optional-dependencies]
 test = ["pytest"]
+ml = ["torch", "scikit-learn"]
 
 [project.scripts]
 ephys-suite = "ephys_suite.__main__:main"
 ephys-suite-qc = "ephys_suite.qc:main"
+ephys-suite-classify = "ephys_suite.ml.infer:main"
 
 [tool.setuptools]
-packages = ["ephys_suite"]
+packages = ["ephys_suite", "ephys_suite.ml"]

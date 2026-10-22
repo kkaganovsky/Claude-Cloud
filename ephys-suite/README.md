@@ -163,3 +163,14 @@ licensing is acceptable for your use before redistributing.
 
 ## Reviewing classifier-proposed events
 The Events tab can load a candidates CSV from the sEPSC classifier (columns `sweep, time_in_sweep_ms, score, accepted`): accepted candidates become the event set, borderline ones are orange rings you click to accept, **R** steps through the most uncertain candidates, **M** marks a record fully reviewed, and *Save review…* writes the final decisions for retraining (see `model_review.py`).
+
+## sEPSC classifier inference (optional)
+
+`ephys_suite/ml/` runs a trained CNN (+ random-forest) sEPSC classifier. Only inference is in the repository; training code and model weights live outside it and are updated separately.
+
+```bash
+pip install -e ".[ml]"          # torch + scikit-learn
+ephys-suite-classify cell.abf --model final_models_v2.pkl --out candidates/
+```
+
+Writes `candidates/cell.candidates.csv` (`sweep, time_in_sweep_ms, score, accepted, amplitude_pA`), which loads in the Events tab ("Review model events") for accept / remove review. The model bundle is a pickle (load only bundles you trust); its format is documented in `ephys_suite/ml/infer.py`. Candidates come from the matched-filter and derivative detectors on a 10 kHz, 3 kHz low-passed copy of the trace; events in the first 30 ms or last 120 ms of a sweep are not scored, and test pulses are not masked, so exclude them before counting frequency. Scores are calibrated against reviewed labels only if the weights were; check quiet cells (low event rate, small events) by hand.
