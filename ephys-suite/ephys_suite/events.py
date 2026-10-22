@@ -570,10 +570,14 @@ class EditLog:
     added: List[ManualEvent] = field(default_factory=list)
     deleted: List[Tuple[int, int]] = field(default_factory=list)                  # (record, peak_idx)
     baselines: dict = field(default_factory=dict)                                 # (record, peak_idx) -> (idx, level)
+    # review decisions (they live in the log so that one undo history covers edits and decisions)
+    confirmed: set = field(default_factory=set)       # (record, peak_idx) the reviewer verified as a real event
+    rejected: set = field(default_factory=set)        # events the reviewer removed
+    dismissed: set = field(default_factory=set)       # candidates / suspects the reviewer decided are NOT events
 
     def copy(self):
         return EditLog([ManualEvent(m.record, m.peak_idx, m.baseline, m.fit) for m in self.added], list(self.deleted),
-                       dict(self.baselines))
+                       dict(self.baselines), set(self.confirmed), set(self.rejected), set(self.dismissed))
 
     def is_empty(self):
         return not (self.added or self.deleted or self.baselines)
@@ -718,25 +722,35 @@ class EventSession:
         self._undo.append(self.log.copy())
         self._redo.clear()
 
-    def add(self, record, peak_idx, fit=True, baseline=None):
-        """Add an event at a (snapped) peak sample. Returns (Event | None, reason). Nothing changes on failure."""
+    def add(self, record, peak_idx, fit=True, baseline=None, confirm=False, thresholds=None):
+        """Add an event at a (snapped) peak sample. Returns (Event | None, reason). Nothing changes on failure.
+        confirm=True also records it as verified by the reviewer (same undo step). thresholds=False skips the amplitude /
+        lower / upper tests while still measuring kinetics (for candidates somebody else already proposed)."""
         if self.find_event(record, peak_idx) is not None:
             return self.find_event(record, peak_idx), "duplicate"
         nb = self._neighbours(self.events, record, peak_idx)
         # trial analysis, only to decide whether the add is allowed (thresholds apply when fitting kinetics)
-        line = _lower_threshold_line(self.t, self.Y[record], self.p) if fit else None
+        check = fit if thresholds is None else bool(thresholds)
+        line = _lower_threshold_line(self.t, self.Y[record], self.p) if check else None
         ev, why = analyse_event_ex(self.t, self.Y[record], peak_idx, nb[0], nb[1], self.p, record, self.starts[record], line,
-                                   baseline=baseline, fit_kinetics=fit, apply_thresholds=fit, manual=True)
+                                   baseline=baseline, fit_kinetics=fit, apply_thresholds=check, manual=True)
         if ev is None:
             return None, why
         self._checkpoint()
         self.log.deleted = [(r, k) for r, k in self.log.deleted if not (r == record and abs(k - peak_idx) <= self._tol())]
         self.log.added.append(ManualEvent(record, int(peak_idx), baseline, fit))
+        self._drop_decisions(record, peak_idx, ("rejected", "dismissed"))
+        if confirm:
+            self.log.confirmed.add((int(record), int(peak_idx)))
         self._rebuild()
         return self.find_event(record, peak_idx), "ok"
 
     def delete(self, ev: Event):
         self._checkpoint()
+        self._delete_core(ev)
+        self._rebuild()
+
+    def _delete_core(self, ev: Event):
         key = (ev.record, ev.peak_idx)
         was_manual = [m for m in self.log.added if m.record == ev.record and abs(m.peak_idx - ev.peak_idx) <= self._tol()]
         if was_manual:
@@ -745,7 +759,78 @@ class EventSession:
                                  for e in (self.auto.events if self.auto else [])):
             self.log.deleted.append(key)
         self.log.baselines.pop(key, None)
+
+    # ------------------------------------------------------------------------------------- review decisions
+    def _dtol(self):
+        """Tolerance (samples) for matching a decision to an event: 1 ms."""
+        return max(1, int(round(1.0 / self.ts)))
+
+    def _near(self, keys, record, idx):
+        tol = self._dtol()
+        return [k for k in keys if k[0] == record and abs(k[1] - idx) <= tol]
+
+    def _drop_decisions(self, record, idx, names):
+        for n in names:
+            st = getattr(self.log, n)
+            for k in self._near(st, record, idx):
+                st.discard(k)
+
+    def decision(self, record, idx):
+        """'confirmed' | 'rejected' | 'dismissed' | None for the peak at (record, idx)."""
+        for n in ("confirmed", "rejected", "dismissed"):
+            if self._near(getattr(self.log, n), record, idx):
+                return n
+        return None
+
+    def is_verified(self, ev: Event):
+        """Events the reviewer added by hand count as verified; others need an explicit confirmation."""
+        return ev.manual or self.decision(ev.record, ev.peak_idx) == "confirmed"
+
+    def confirm(self, ev: Event):
+        self._checkpoint()
+        self._drop_decisions(ev.record, ev.peak_idx, ("rejected", "dismissed"))
+        self.log.confirmed.add((ev.record, ev.peak_idx))
+
+    def unconfirm(self, ev: Event):
+        self._checkpoint()
+        self._drop_decisions(ev.record, ev.peak_idx, ("confirmed",))
+
+    def reject(self, ev: Event):
+        """Remove an event AND remember that the reviewer rejected it (one undo step)."""
+        self._checkpoint()
+        self._drop_decisions(ev.record, ev.peak_idx, ("confirmed",))
+        self._delete_core(ev)
+        self.log.rejected.add((ev.record, ev.peak_idx))
         self._rebuild()
+
+    def unreject(self, record, peak_idx, fit=True):
+        """Bring a rejected event back (gallery toggle). Returns the event or None."""
+        self._checkpoint()
+        tol = self._tol()
+        self.log.deleted = [(r, k) for r, k in self.log.deleted if not (r == record and abs(k - peak_idx) <= tol)]
+        self._drop_decisions(record, peak_idx, ("rejected",))
+        self._rebuild()
+        if self.find_event(record, peak_idx) is None:
+            nb = self._neighbours(self.events, record, peak_idx)
+            ev, _ = analyse_event_ex(self.t, self.Y[record], peak_idx, nb[0], nb[1], self.p, record, self.starts[record], None,
+                                     fit_kinetics=fit, apply_thresholds=False, manual=True)
+            if ev is None:
+                ev, _ = analyse_event_ex(self.t, self.Y[record], peak_idx, nb[0], nb[1], self.p, record, self.starts[record], None,
+                                         fit_kinetics=False, apply_thresholds=False, manual=True)
+            if ev is not None:
+                self.log.added.append(ManualEvent(record, int(peak_idx), None, ev.fitted))
+                self._rebuild()
+        return self.find_event(record, peak_idx)
+
+    def dismiss(self, record, peak_idx):
+        """The reviewer decided a candidate / suspect at this peak is not an event."""
+        self._checkpoint()
+        self._drop_decisions(record, peak_idx, ("confirmed",))
+        self.log.dismissed.add((int(record), int(peak_idx)))
+
+    def undismiss(self, record, peak_idx):
+        self._checkpoint()
+        self._drop_decisions(record, peak_idx, ("dismissed",))
 
     def set_baseline(self, ev: Event, bl_idx: int, bl_level: float):
         """Move an event's baseline by hand; its other parameters are re-measured."""

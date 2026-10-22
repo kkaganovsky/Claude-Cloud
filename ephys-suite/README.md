@@ -164,6 +164,24 @@ licensing is acceptable for your use before redistributing.
 ## Reviewing classifier-proposed events
 The Events tab can load a candidates CSV from the sEPSC classifier (columns `sweep, time_in_sweep_ms, score, accepted`): accepted candidates become the event set, borderline ones are orange rings you click to accept, **R** steps through the most uncertain candidates, **M** marks a record fully reviewed, and *Save review…* writes the final decisions for retraining (see `model_review.py`).
 
+## Verifying events and finding missed ones (Events tab)
+
+A **Verify card** (right of the trace) and an **overview strip** (under it) turn review into a short loop. Everything uses the same
+event set, table and Ctrl+Z as before.
+
+| Goal | How |
+|---|---|
+| **Verify predicted events** | An event stays *to verify* until you confirm it. The card shows the current item zoomed (-25 / +60 ms) with the baseline, the peak, the model score, SNR and the gap to the previous event, plus a green line showing the *typical event scaled to this amplitude* so a wrong shape is obvious. **Y / Enter** confirms and moves on, **N** rejects (event removed) and moves on, **. / ,** skip / go back. Queues (drop-down): model events *least sure first* (default after loading candidates), *all events in time order* (also for events from the normal detector), *borderline candidates*, *possible missed events*. |
+| **Check many at once** | **G** opens the **gallery**: a contact sheet (5 x 4 by default, same Y scale, shape overlay). Click a thumbnail to flip it (event queues: reject / bring back; candidate queues: add / remove); **Enter** confirms (or, for candidate queues, dismisses) everything you left alone and turns the page; *Next page with undecided* skips finished pages. |
+| **Find missed events** | The **overview strip** shows every record side by side: signal envelope, event ticks (red = to verify, green = confirmed, blue = added by hand, orange = borderline, purple = possible miss), a **green/grey strip of which parts you have actually looked at**, and the current window (click or drag to jump). **V** jumps to the next unviewed stretch, so paging through the whole trace is a loop of *look - add what you see (A) - V*. A window only counts as viewed when it is <= 2.5 s wide (adjustable) and stays on screen for 0.35 s, so zooming out or holding PageDown does not count. When a record is fully viewed and fully decided the card says so and **M** marks it reviewed. |
+| **Second opinion** | **F** (or the *Possible miss* button) jumps to places that a separate, permissive deconvolution detector (cutoff 2.5 SD, amplitude >= 3 x the record's noise) flags but that are not events, not model candidates and not already decided - strongest first. **Y** adds one (kinetics measured, thresholds off; if no baseline can be found you get the same click-the-baseline prompt as for hand-added events), **N** dismisses it for good. Click a purple diamond on the trace to focus it, click it again to add it. This is a *second detector*, not proof: events that look like noise to both the model and a deconvolution detector will not be flagged - the coverage strip is what shows you looked everywhere. |
+| **Resume later** | Decisions, hand edits (adds, baselines), dismissed candidates, coverage and records marked reviewed autosave 1.5 s after each change to `<candidates>.review_progress.json` (or next to the recording if no candidates are loaded). Loading the same candidates again offers to resume; *Resume saved review* restores it later. |
+| **Save** | *Save review...* writes the existing CSV plus two appended columns, `decision` (confirmed / rejected / dismissed / unreviewed / added) and `record_viewed_pct`; decided second-opinion places are listed as `source = suspect`. The `.json` next to it gains `viewed_fraction_by_record`, `viewed_fraction_total` and `viewed_intervals_ms`, so labels can be limited to stretches that were really reviewed. |
+
+Keys: **Y/Enter** confirm, **N** reject, **. ,** next / previous, **E** next event to verify, **F** / **Shift+F** next / previous possible miss,
+**V** next unviewed stretch, **G** gallery, plus the existing **R** (next uncertain candidate), **M**, **A**, **B**, **K**, Delete, Ctrl+Z / Ctrl+Y.
+Keys are ignored while you are typing in a box. **Delete** on a selected event now also records it as *rejected*.
+
 ## sEPSC classifier inference (optional)
 
 `ephys_suite/ml/` runs a trained CNN (+ random-forest) sEPSC classifier. Only inference is in the repository; training code and model weights live outside it and are updated separately.

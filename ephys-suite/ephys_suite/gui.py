@@ -566,6 +566,8 @@ class EventsTab(QtWidgets.QWidget):
         self._timer = QtCore.QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._refresh_summary)
+        from .gui_verify import VerifyKit               # lazy: gui_verify imports from the same package
+        self.kit = VerifyKit(self)                      # verify card, overview strip, gallery, coverage, autosave
 
     # ---------------------------------------------------------------------------------------- layout
     def _build_side(self):
@@ -877,6 +879,8 @@ class EventsTab(QtWidgets.QWidget):
         self.p.direction = int(self.p.direction)
         self.session = E.EventSession(rec.t, rec.ch[self.chan.currentIndex()], self.p, rec.sweep_start_ms)
         self.pd.setLabel("left", rec.units[self.chan.currentIndex()])
+        if getattr(self, "kit", None) is not None:
+            self.kit.on_session_reset()
         self._load_record(reset_x=True)
         self._refresh_all()
 
@@ -972,12 +976,16 @@ class EventsTab(QtWidgets.QWidget):
             self.sc_pend.setData([e.bl_t], [e.bl_im])
         else:
             self.sc_pend.setData([], [])
+        if getattr(self, "kit", None) is not None:
+            self.kit.on_markers()
 
     def _refresh_all(self):
         self._markers()
         self._fill_table()
         self._timer.start(120)
         self._summary_label()
+        if getattr(self, "kit", None) is not None:
+            self.kit.on_events_changed()
 
     def _summary_label(self):
         if self.session is None:
@@ -1163,6 +1171,8 @@ class EventsTab(QtWidgets.QWidget):
                 self.say("Event selected (blue ring). Click it again or press <b>Delete</b> to remove it; <b>B</b> moves its "
                          "baseline; ←/→ steps between events.")
             return True
+        if getattr(self, "kit", None) is not None and self.kit.on_click(x, y, vb):
+            return True
         cand = self._hit_cand(x, y, vb)
         if cand is not None and not self.btn_add.isChecked():
             self.accept_candidate(cand)
@@ -1311,7 +1321,7 @@ class EventsTab(QtWidgets.QWidget):
         if self.session is None or self.sel is None:
             return
         ev = self.sel
-        self.session.delete(ev)
+        self.session.reject(ev)                           # removes it AND records the rejection (exported with the review)
         k = max(0, self._rows.index(ev) - 1) if ev in self._rows else 0
         self.sel = None
         self._refresh_all()
@@ -1324,6 +1334,8 @@ class EventsTab(QtWidgets.QWidget):
         if ok:
             self.sel = None
             self._refresh_all()
+            if undo and getattr(self, "kit", None) is not None:
+                self.kit.on_undo()
             self.say("Undone." if undo else "Redone.")
 
     # ------------------------------------------------------------------------------------- model review
@@ -1386,6 +1398,8 @@ class EventsTab(QtWidgets.QWidget):
         self._load_record(reset_x=False)
         self._refresh_all()
         self._review_label()
+        if getattr(self, "kit", None) is not None:
+            self.kit.on_candidates_loaded(path)
         self.say(f"Loaded {n} model events. Click an event twice (or Delete) to remove it, click an orange ring to accept it, "
                  "<b>R</b> jumps to the next uncertain candidate, <b>M</b> marks a record fully reviewed.")
         return True
@@ -1426,7 +1440,9 @@ class EventsTab(QtWidgets.QWidget):
         base = os.path.splitext(os.path.basename(self.main.rec.path))[0]
         path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save review", f"{base}_review.csv", "CSV (*.csv)")
         if path:
-            n, ch = MR.export_review(path, self.session, self.review, os.path.basename(self.main.rec.path), self.main.rec.path)
+            kit = getattr(self, "kit", None)
+            n, ch = MR.export_review(path, self.session, self.review, os.path.basename(self.main.rec.path), self.main.rec.path,
+                                     coverage=kit.cov if kit else None, suspects=kit.suspects if kit else None)
             self.say(f"Saved {n} rows ({ch} decisions differ from the model) to {os.path.basename(path)}.")
 
     def export_csv(self):

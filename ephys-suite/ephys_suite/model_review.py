@@ -81,11 +81,24 @@ def load_candidates(path, session, thr=None):
     return ReviewState(cands, thr, os.path.basename(path))
 
 
-def export_review(path, session, state, recording="", recording_path=""):
-    """Write the final decision for every model candidate plus manual additions; returns (n_rows, n_changed)."""
+def export_review(path, session, state, recording="", recording_path="", coverage=None, suspects=None):
+    """Write the final decision for every model candidate plus manual additions; returns (n_rows, n_changed).
+
+    Columns after `visited` (appended, so older readers are unaffected): decision (confirmed / rejected / dismissed /
+    unreviewed / added), record_viewed_pct (share of the record the reviewer looked at). Suspects (second-opinion places)
+    that were decided are listed as source 'suspect'."""
     ts = session.ts
     tol = max(1, int(round(4.0 / ts)))
     rows, changed, near = [], 0, set()
+
+    def decision(rec, idx, final):
+        d = session.decision(rec, idx)
+        if d:
+            return d
+        return "unreviewed" if final else ""
+
+    def viewed(rec):
+        return round(100.0 * coverage.fraction(rec), 1) if coverage is not None else ""
     for c in state.cands:
         if c.score < MIN_SHOW and not c.accepted:
             continue
@@ -95,17 +108,32 @@ def export_review(path, session, state, recording="", recording_path=""):
             near.add((ev.record, ev.peak_idx))
         changed += int(final != c.accepted)
         rows.append([recording, c.record + 1, round(c.peak_idx * ts, 3), c.peak_idx, round(c.score, 4), int(c.accepted), int(final),
-                     "model", int(c.record in state.reviewed), int((c.record, c.peak_idx) in state.visited)])
+                     "model", int(c.record in state.reviewed), int((c.record, c.peak_idx) in state.visited),
+                     decision(c.record, c.peak_idx, final), viewed(c.record)])
     for e in session.events:
         if (e.record, e.peak_idx) not in near:
             rows.append([recording, e.record + 1, round(e.peak_idx * ts, 3), e.peak_idx, "", 0, 1, "manual_add",
-                         int(e.record in state.reviewed), 1])
+                         int(e.record in state.reviewed), 1, "added", viewed(e.record)])
             changed += 1
+    for sp in suspects or []:
+        d = session.decision(sp.record, sp.peak_idx)
+        ev = session.find_event(sp.record, sp.peak_idx, tol)
+        if d is None and ev is None:
+            continue
+        if ev is not None and (ev.record, ev.peak_idx) in near:
+            continue
+        rows.append([recording, sp.record + 1, round(sp.peak_idx * ts, 3), sp.peak_idx, "", 0, int(ev is not None), "suspect",
+                     int(sp.record in state.reviewed), 1, d or "added", viewed(sp.record)])
     with open(path, "w", newline="") as fh:
         w = csv.writer(fh)
         w.writerow(["recording", "sweep", "time_in_sweep_ms", "peak_idx", "model_score", "model_accepted", "final_event", "source",
-                    "sweep_marked_reviewed", "visited"])
+                    "sweep_marked_reviewed", "visited", "decision", "record_viewed_pct"])
         w.writerows(rows)
-    json.dump(dict(recording=recording, recording_path=recording_path, source=state.source, threshold=state.thr, reviewed_sweeps=sorted(int(r) + 1 for r in state.reviewed),
-                   n_changed=changed), open(os.path.splitext(path)[0] + ".json", "w"), indent=1)
+    meta = dict(recording=recording, recording_path=recording_path, source=state.source, threshold=state.thr,
+                reviewed_sweeps=sorted(int(r) + 1 for r in state.reviewed), n_changed=changed)
+    if coverage is not None:
+        meta["viewed_fraction_by_record"] = {str(r + 1): round(coverage.fraction(r), 4) for r in range(len(coverage.len))}
+        meta["viewed_fraction_total"] = round(coverage.fraction(), 4)
+        meta["viewed_intervals_ms"] = {str(int(r) + 1): v for r, v in coverage.to_json().items()}
+    json.dump(meta, open(os.path.splitext(path)[0] + ".json", "w"), indent=1)
     return len(rows), changed
