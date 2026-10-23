@@ -118,7 +118,9 @@ def read_sweeps(path: str):
     units = [(u or "").replace("µ", "u").strip() for u in abf.adcUnits]
     ci = next((c for c, u in enumerate(units) if u in ("pA", "nA", "uA", "fA")), None)
     vi = next((c for c, u in enumerate(units) if u in ("mV", "V", "uV")), None)
-    info = dict(units=units, names=list(abf.adcNames), rate=float(abf.dataRate), current_channel=ci, command_channel=vi)
+    cu = (getattr(abf, "sweepUnitsC", "") or "").replace("µ", "u").strip()
+    info = dict(units=units, names=list(abf.adcNames), rate=float(abf.dataRate), current_channel=ci, command_channel=vi,
+                header_command=vi is None and cu in ("mV", "V", "uV"))
     if ci is None:
         return [], info
     out = []
@@ -130,6 +132,9 @@ def read_sweeps(path: str):
         if vi is not None:
             abf.setSweep(s, channel=vi)
             V = np.asarray(abf.sweepY, float) * _SCALE[units[vi]]
+        elif cu in ("mV", "V", "uV"):                 # no recorded voltage channel: the protocol's command waveform is in the header
+            abf.setSweep(s, channel=ci)
+            V = np.asarray(abf.sweepC, float) * _SCALE[cu]
         out.append((t, I, V))
     return out, info
 

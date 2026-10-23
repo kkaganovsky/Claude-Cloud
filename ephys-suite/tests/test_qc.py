@@ -188,10 +188,10 @@ def test_auto_detection_agrees_with_the_matlab_script_on_the_embedded_pulse(mock
     np.testing.assert_allclose([s.ra for s in f10.sweeps], ref, rtol=0.01)
 
 
-def test_cm_file_without_a_command_channel(mock_tree):
+def test_cm_file_without_a_recorded_command_channel_uses_the_header_command(mock_tree):
     f = qc.analyse_file(os.path.join(mock_tree, "line 14/cell 1/CM/26a01002.abf"), "CM", "CM file", QCParams())
-    assert f.n_ok == f.n_sweeps == 14 and f.dv_source == "assumed" and 9 < f.ra_mean < 12
-    assert any("assumed" in r for r in f.reasons)
+    assert f.n_ok == f.n_sweeps == 14 and f.dv_source == "command channel" and 9 < f.ra_mean < 12
+    assert not any("assumed" in r for r in f.reasons)
     assert f.sweeps[0].onset_ms == pytest.approx(53.3, abs=0.3)
 
 
