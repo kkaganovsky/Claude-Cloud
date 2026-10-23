@@ -9,6 +9,8 @@ Bundle (pickle, produced by the training code that lives next to the weights): d
     threshold     score at or above which a candidate is accepted
     cin           number of CNN input channels (2 single scale, 4 multiscale)
 
+Noisy recordings (median pre-event SD >= 1.86 pA) use a stricter threshold (0.90). Events outside the envelope of annotated sEPSCs
+(deeper than 100 pA, or slow to recover) are flagged "large_slow" and not accepted; candidates within -20..+150 ms of one are marked "near_large" (still accepted by score: check them).
 Candidates come from the matched-filter + derivative detectors on a 10 kHz, 3 kHz low-passed copy of the trace; events within the first
 30 ms or the last 120 ms of a sweep (no room for the wide window) are not scored. Test pulses are not masked here.
 """
@@ -20,8 +22,13 @@ import numpy as np
 
 from . import core as C
 
-COLUMNS = ["sweep", "time_in_sweep_ms", "score", "accepted", "amplitude_pA"]
+COLUMNS = ["sweep", "time_in_sweep_ms", "score", "accepted", "amplitude_pA", "flag"]
+NOISY_PRE_SD_PA = 1.86     # median pre-event window SD at or above this = noisy recording (top quarter of the training recordings)
+NOISY_THRESHOLD = 0.90    # stricter acceptance threshold for noisy recordings (precision/recall trade-off chosen by the user)
 MIN_KEEP = 0.25           # candidates below this score are not written (the review tool ignores them anyway)
+
+
+LAST = {}               # info about the last classify_recording call: noisy flag, pre-event noise SD, threshold used
 
 
 def load_bundle(path):
@@ -94,12 +101,15 @@ def suppress_duplicates(sweep, idx, sc, tol=40):
     return out
 
 
-def classify_recording(rec, bundle, threshold=None, nets=None):
-    """rec: ephys_suite.io.Recording. Returns rows (dicts with COLUMNS) for candidates scoring >= MIN_KEEP."""
+def classify_recording(rec, bundle, threshold=None, nets=None, accept_flagged=False):
+    """rec: ephys_suite.io.Recording. Returns rows (dicts with COLUMNS) for candidates scoring >= MIN_KEEP.
+
+    Events outside the envelope of annotated sEPSCs (deeper than 100 pA, or half-recovery slower than 40 ms with depth > 30 pA: failed spikes,
+    escape currents, slow steps) get flag="large_slow" and are NOT accepted unless accept_flagged=True, so they stay out of EPSC counts but remain
+    visible for review."""
     im = rec.im()
     if im is None:
         raise ValueError("recording has no current channel (pA)")
-    thr = float(threshold if threshold is not None else bundle["threshold"])
     sw, ix, Xs, Fs = [], [], [], []
     for s in range(im.shape[0]):
         idx, X, Fm, _ = candidates(im[s], rec.fs)
@@ -107,11 +117,25 @@ def classify_recording(rec, bundle, threshold=None, nets=None):
     if not sw:
         return []
     idx, X, Fm, sweep = np.concatenate(ix), np.concatenate(Xs), np.concatenate(Fs), np.array(sw)
+    pre_sd = float(np.median(Fm[:, 3] * 10 ** Fm[:, 16]))
+    noisy = pre_sd >= NOISY_PRE_SD_PA
+    thr = float(threshold) if threshold is not None else max(float(bundle["threshold"]), NOISY_THRESHOLD) if noisy else float(bundle["threshold"])
+    LAST.update(noisy=noisy, pre_sd=pre_sd, threshold=thr)
     sc = suppress_duplicates(sweep, idx, score(bundle, X, Fm, nets))
     rows = []
     for k in np.where(sc >= MIN_KEEP)[0]:
+        flagged = C.is_large_or_slow(*C.shape_features(X[k]))
         rows.append(dict(sweep=int(sweep[k]) + 1, time_in_sweep_ms=round(idx[k] / C.FS * 1000.0, 2), score=round(float(sc[k]), 4),
-                         accepted=int(sc[k] >= thr), amplitude_pA=round(float(-Fm[k, 0]), 2)))
+                         accepted=int(sc[k] >= thr and (accept_flagged or not flagged)), amplitude_pA=round(float(-Fm[k, 0]), 2),
+                         flag="large_slow" if flagged else ""))
+    # candidates riding on the recovery of a flagged event: baseline and amplitude are unreliable there. Marked for review, acceptance unchanged.
+    by_sweep = {}
+    for r in rows:
+        if r["flag"] == "large_slow":
+            by_sweep.setdefault(r["sweep"], []).append(r["time_in_sweep_ms"])
+    for r in rows:
+        if not r["flag"] and any(-20.0 <= r["time_in_sweep_ms"] - t <= 150.0 for t in by_sweep.get(r["sweep"], ())):
+            r["flag"] = "near_large"
     return rows
 
 
@@ -130,15 +154,18 @@ def main(argv=None):
     ap.add_argument("--model", required=True, help="model bundle (.pkl)")
     ap.add_argument("--out", default=".", help="output folder for <name>.candidates.csv")
     ap.add_argument("--threshold", type=float, default=None, help="override the bundle's acceptance threshold")
+    ap.add_argument("--accept-flagged", action="store_true", help="also accept events flagged large_slow (default: flagged events are not accepted)")
     a = ap.parse_args(argv)
     bundle = load_bundle(a.model)
     nets = _nets(bundle)
     os.makedirs(a.out, exist_ok=True)
     for p in a.abf:
-        rows = classify_recording(load_abf(p), bundle, a.threshold, nets)
+        rows = classify_recording(load_abf(p), bundle, a.threshold, nets, a.accept_flagged)
         out = os.path.join(a.out, os.path.splitext(os.path.basename(p))[0] + ".candidates.csv")
         write_candidates(rows, out)
-        print("%s: %d accepted of %d candidates -> %s" % (os.path.basename(p), sum(r["accepted"] for r in rows), len(rows), out))
+        print("%s: %d accepted of %d candidates -> %s (threshold %.3f%s; %d flagged large_slow)" % (
+            os.path.basename(p), sum(r["accepted"] for r in rows), len(rows), out, LAST.get("threshold", float("nan")),
+            ", NOISY recording" if LAST.get("noisy") else "", sum(1 for r in rows if r["flag"] == "large_slow")))
 
 
 if __name__ == "__main__":

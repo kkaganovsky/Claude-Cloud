@@ -62,3 +62,24 @@ def test_duplicate_suppression():
     sweep = np.array([0, 0, 0, 1]); idx = np.array([1000, 1020, 2000, 1010]); sc = np.array([0.6, 0.9, 0.7, 0.8])
     out = infer.suppress_duplicates(sweep, idx, sc)
     assert out.tolist() == [0.0, 0.9, 0.7, 0.8]
+
+
+def test_shape_flag_separates_epsc_from_large_and_slow_events():
+    n = C.WPRE + C.WPOST
+    tt = np.arange(n) / C.FS * 1000.0
+    def ev(depth, tau):
+        y = np.zeros(n); k = C.WPRE; m = tt >= tt[k]
+        y[m] = -depth * (np.exp(-(tt[m] - tt[k]) / tau) - np.exp(-(tt[m] - tt[k]) / 0.4)) / 0.9
+        return y
+    assert not C.is_large_or_slow(*C.shape_features(ev(20, 4.0)))        # typical sEPSC
+    assert C.is_large_or_slow(*C.shape_features(ev(200, 4.0)))           # very large
+    assert C.is_large_or_slow(*C.shape_features(ev(50, 80.0)))           # slow step / escape current
+    assert not C.is_large_or_slow(*C.shape_features(ev(5, 80.0)))        # tiny + slow recovery is noise-limited, not flagged
+
+
+def test_flagged_events_are_not_accepted_by_default(rec):
+    r, _ = rec
+    rows = infer.classify_recording(r, _bundle(threshold=0.0))
+    assert set(x["flag"] for x in rows) <= {"", "large_slow", "near_large"}
+    assert all(not (x["flag"] and x["accepted"]) for x in rows)
+    assert "threshold" in infer.LAST

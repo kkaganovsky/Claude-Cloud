@@ -171,3 +171,26 @@ def detect_all(y, thr=3.0, k=4.0):
                 keep.append(p)
         allp = np.array(keep, int)
     return allp, sd
+
+
+# ---- shape flag: events outside the envelope of annotated sEPSCs (failed spikes, escape currents, slow drift steps) ----
+FLAG_DEPTH_PA = 100.0      # annotated sEPSCs: 99.9th percentile of depth ~83 pA
+FLAG_SLOW_MS = 40.0        # time to recover half the depth; annotated sEPSCs: 99.9th percentile ~30 ms
+FLAG_SLOW_MIN_DEPTH = 30.0 # slow recovery is only meaningful for events well above the noise
+
+
+def shape_features(ww):
+    """ww: wide window (WPRE+WPOST samples at 10 kHz, peak at WPRE). Returns (depth_pA, t_half_ms) measured on a 1 ms smoothed trace,
+    relative to the median of the first 15 ms of the window; t_half = time after the minimum to recover half of the depth (capped at the window)."""
+    y = ndimage.uniform_filter1d(np.asarray(ww, float), 10, mode="nearest")
+    base = float(np.median(ww[:150]))
+    seg = y[WPRE - 30:WPRE + 30]
+    ip = WPRE - 30 + int(np.argmin(seg))
+    depth = base - float(y[ip])
+    r = np.where(y[ip:] >= base - 0.5 * depth)[0]
+    t_half = (r[0] if len(r) else len(y) - ip) / FS * 1000.0
+    return depth, t_half
+
+
+def is_large_or_slow(depth, t_half):
+    return bool(depth > FLAG_DEPTH_PA or (depth > FLAG_SLOW_MIN_DEPTH and t_half > FLAG_SLOW_MS))
