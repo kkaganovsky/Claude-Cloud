@@ -176,9 +176,95 @@ def _fit_window(t, v, r: SweepPassive, p: PassiveParams):
     return t0, t1
 
 
-def rmp(v, t=None, region=None) -> float:
-    """Resting membrane potential: mean Vm of a trace (optionally a region in ms)."""
+@dataclass
+class RmpParams:
+    """Broad spike / event exclusion for the resting membrane potential.
+
+    An event is any fast rise (rise_mV within rise_ms; default 2.5 mV in 5 ms = 0.5 mV/ms, against ~0.06 mV/ms for slow drifts), whatever its
+    amplitude, so small spikes that never reach 0 mV are caught. The excluded window runs from the foot of the rising phase (walking back to
+    within foot_mV of the pre-event baseline, at most max_back ms) minus pre_pad, to the return to within return_mV of the baseline after the
+    peak (at most max_tail ms) plus post_pad (afterhyperpolarisation / recovery)."""
+    exclude_events: bool = True
+    rise_mV: float = 2.5
+    rise_ms: float = 5.0
+    smooth_ms: float = 0.5
+    foot_mV: float = 0.5
+    return_mV: float = 1.5
+    pre_pad: float = 20.0
+    post_pad: float = 100.0
+    max_back: float = 300.0
+    max_tail: float = 600.0
+
+
+@dataclass
+class RmpResult:
+    rmp: float                      # mean Vm of the samples that were not excluded (plain mean if nothing was excluded or exclusion is off)
+    keep: np.ndarray                # bool mask of the samples used
+    events: List[Tuple[float, float, float, float]] = field(default_factory=list)   # (foot_ms, peak_ms, return_ms, rise_mV) of each excluded event
+    pct_excluded: float = 0.0
+    plain: float = np.nan           # mean of the whole trace, for comparison
+
+
+def _event_mask(t, v, p: RmpParams):
+    from scipy import ndimage
+
+    dt = ts_ms(t)
+    n = len(v)
+    vs = ndimage.uniform_filter1d(v, max(1, int(round(p.smooth_ms / dt))), mode="nearest")
+    w = max(1, int(round(p.rise_ms / dt)))
+    if n <= w + 2:
+        return np.zeros(n, bool), []
+    rise = np.zeros(n)
+    rise[:-w] = vs[w:] - vs[:-w]
+    trig = np.flatnonzero(rise >= p.rise_mV)
+    mask = np.zeros(n, bool)
+    events = []
+    i = 0
+    while i < len(trig):
+        k0 = int(trig[i])
+        pk = k0 + int(np.argmax(vs[k0:min(n, k0 + int(round(60.0 / dt)))]))        # peak of this excursion
+        lo = max(0, k0 - int(round(300.0 / dt)))
+        hi = max(lo + 1, k0 - int(round(10.0 / dt)))
+        base = float(np.percentile(vs[lo:hi], 20)) if k0 > lo + 5 else float(vs[max(0, k0 - 1)])
+        s = k0
+        while s > max(0, k0 - int(round(p.max_back / dt))) and vs[s] > base + p.foot_mV:
+            s -= 1                                                                  # foot of the rising phase
+        e = pk
+        while e < min(n - 1, pk + int(round(p.max_tail / dt))) and abs(vs[e] - base) > p.return_mV:
+            e += 1                                                                  # back to baseline (from above or below)
+        a, b = max(0, s - int(round(p.pre_pad / dt))), min(n, e + int(round(p.post_pad / dt)))
+        mask[a:b] = True
+        events.append((float(t[s]), float(t[pk]), float(t[e]), float(vs[pk] - base)))
+        j = i
+        while j < len(trig) and trig[j] < e:
+            j += 1
+        i = max(j, i + 1)
+    return mask, events
+
+
+def rmp_clean(t, v, region=None, p: Optional[RmpParams] = None) -> RmpResult:
+    """Resting membrane potential with broad event exclusion. t in ms; region = (start_ms, stop_ms) limits the trace first.
+    If more than 90 % of the trace would be excluded, the plain mean is returned (nothing sensible left) with keep all True."""
+    p = p or RmpParams()
+    t = np.asarray(t, float)
     v = np.asarray(v, float)
-    if region is None or t is None:
+    if region is not None:
+        i, j = idx_at(t, region[0]), idx_at(t, region[1])
+        t, v = t[i:j], v[i:j]
+    plain = float(v.mean()) if len(v) else float("nan")
+    if not p.exclude_events or len(v) < 10:
+        return RmpResult(plain, np.ones(len(v), bool), [], 0.0, plain)
+    mask, events = _event_mask(t, v, p)
+    keep = ~mask
+    if keep.sum() < 0.1 * len(v):
+        return RmpResult(plain, np.ones(len(v), bool), events, 100.0 * mask.mean(), plain)
+    return RmpResult(float(v[keep].mean()), keep, events, 100.0 * mask.mean(), plain)
+
+
+def rmp(v, t=None, region=None, p: Optional[RmpParams] = None) -> float:
+    """Resting membrane potential (mV). With a time axis t (ms) fast events - spikes of any size, including ones that never reach 0 mV -
+    are excluded with a window around each (see RmpParams); without t it is the plain mean. region = (start_ms, stop_ms)."""
+    v = np.asarray(v, float)
+    if t is None:
         return float(v.mean())
-    return window_mean(t, v, *region)
+    return rmp_clean(t, v, region, p).rmp
