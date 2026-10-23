@@ -16,7 +16,7 @@ from . import passive as P
 from . import report as R
 from . import spikes as S
 from .common import idx_at, ts_ms, window_mean
-from .io import load_abf, sibling_abfs
+from .io import current_source, load_abf, sibling_abfs
 
 pg.setConfigOptions(antialias=False, background="w", foreground="k")
 BLUE, RED, GREEN, GREY = (50, 90, 220), (220, 30, 30), (40, 160, 70), (170, 170, 170)
@@ -1544,6 +1544,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setWindowTitle("ephys-suite")
         self.resize(1600, 950)
         self.rec = None
+        self.last_notice = None
+        self._notice_box = None
         self.tabs = QtWidgets.QTabWidget()
         self.setCentralWidget(self.tabs)
         self.passive = PassiveTab(self)
@@ -1621,6 +1623,28 @@ class MainWindow(QtWidgets.QMainWindow):
             self.passive.set_recording(rec)
             self.spikes.set_recording(rec)
         self.statusBar().showMessage(f"{path}: {rec.n_sweeps} sweeps, channels {[f'{n} ({u})' for n, u in zip(rec.names, rec.units)]}")
+        self.notify_current_source(rec)
+
+    CURRENT_NOTICES = {
+        "header": ("Current channel not found",
+                   "This file has no recorded current (pA) channel.\n\nThe suite will use the command waveform from the file header as the current step. "
+                   "That is the commanded current, not a measurement: it matches the recorded current to within ~1-2% where both exist, but it does not include any "
+                   "holding / bias current set on the amplifier, and it assumes the amplifier was set up as the protocol expects."),
+        "none": ("Current channel not found",
+                 "This file has no recorded current (pA) channel and no current command in its header, so the passive-property and spike analyses are not available."),
+    }
+
+    def notify_current_source(self, rec):
+        """Non-blocking notice when the current step has to come from the header (or is missing)."""
+        note = self.CURRENT_NOTICES.get(current_source(rec))
+        self.last_notice = note
+        if note is None:
+            return
+        box = QtWidgets.QMessageBox(QtWidgets.QMessageBox.Information, note[0], note[1], QtWidgets.QMessageBox.Ok, self)
+        box.setAttribute(QtCore.Qt.WA_DeleteOnClose)
+        box.setWindowModality(QtCore.Qt.WindowModal)
+        box.open()                                    # does not block the event loop (or tests)
+        self._notice_box = box
 
     def step_changed(self):
         if self.rec is not None and self.spikes.per is not None and not self._step_busy and self.spikes.isVisible():

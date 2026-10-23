@@ -48,6 +48,16 @@ class Recording:
         return None
 
 
+def current_source(rec: Recording) -> str:
+    """Where the injected current comes from: 'recorded' (a pA channel in the file), 'header' (the protocol's command waveform in pA,
+    used when no current channel was recorded) or 'none'."""
+    if rec.channel_by_units("pA") is not None:
+        return "recorded"
+    if rec.command is not None and rec.command_units == "pA":
+        return "header"
+    return "none"
+
+
 def load_abf(path: str) -> Recording:
     import pyabf
 
