@@ -9,6 +9,10 @@ args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 3) stop("usage: export_seurat.R obj.rds dataset out.tsv [group_cols] [COL=VAL,VAL]")
 obj <- readRDS(args[1]); dataset <- args[2]; out <- args[3]
 group_cols <- if (length(args) >= 4 && nzchar(args[4])) strsplit(args[4], ",")[[1]] else character(0)
+# Use the RNA assay: an "integrated" assay holds only ~2-3k variable genes with
+# batch-corrected (often negative) values, so % expressing / means are not meaningful.
+assay <- Sys.getenv("SEURAT_ASSAY", "RNA")
+if (assay %in% Assays(obj)) DefaultAssay(obj) <- assay
 meta <- obj@meta.data
 cat("assays:", paste(Assays(obj), collapse = ", "), " default:", DefaultAssay(obj), "\n")
 cat("metadata columns:", paste(colnames(meta), collapse = ", "), "\n")
