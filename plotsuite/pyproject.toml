@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plotsuite"
+version = "0.1.0"
+description = "Open-source, GUI-driven graphing and statistics suite modelled on GraphPad Prism"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy", "pandas", "scipy", "statsmodels", "pingouin", "scikit-posthocs",
+  "scikit-learn", "matplotlib", "streamlit", "openpyxl",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.scripts]
+plotsuite = "plotsuite.__main__:main"
+
+[tool.setuptools]
+packages = ["plotsuite", "plotsuite.stats"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore"]
