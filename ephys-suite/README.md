@@ -166,6 +166,33 @@ licensing is acceptable for your use before redistributing.
 ## Reviewing classifier-proposed events
 The Events tab can load a candidates CSV from the sEPSC classifier (columns `sweep, time_in_sweep_ms, score, accepted`): accepted candidates become the event set, borderline ones are orange rings you click to accept, **R** steps through the most uncertain candidates, **M** marks a record fully reviewed, and *Save review…* writes the final decisions for retraining (see `model_review.py`).
 
+## Outside review: HTML package for a collaborator
+Hand the yes / no decisions on model-proposed events to someone who has **no install, no Python and no model**.
+
+1. **Export:** Events tab > *Review model events* > **Export for outside review (HTML)…** (or `ephys-suite-review-export`). It writes a
+   folder (and optionally a `.zip`): `START_HERE.html`, `README.txt` for the reviewer, `data/`, `manifest.json`. Tick which recordings
+   to send; tick *leave out events I have already confirmed / rejected* to keep your own decisions out of it.
+2. **Review (collaborator):** double-click `START_HERE.html` (Chrome works best), pick a cell, press **Y** (yes), **N** (no), **U** (not
+   sure), arrows to go back / forward. Answers save in that browser; **Download results** writes one CSV to send back.
+   The model score is never shown. They can only confirm or reject: *counts from this review can fall below, never above, the model's;*
+   finding missed events still needs the full app.
+3. **Import:** **Import reviewer's results…** (or `ephys-suite-review-import returned.csv --package <folder> --out <folder>`).
+   Matches on `(recording, sweep, round(time_in_sweep_ms, 2))`, never on row order, prints the counts, and writes the GUI's own
+   `<name>_review.csv` plus a `.review_progress.json`; open the recording and use *Resume saved review* to look at what is left.
+   Your own earlier decisions are kept; old output files are renamed `*.bak-<time>`, never overwritten.
+   **Unsure and unanswered events count as NOT events** by default and stay open for a second look
+   (`--unsure-as` / `--blank-as` `not-event | model | event`).
+
+```
+ephys-suite-review-export a.abf b.abf --candidates cands/ --out pkg --zip --min-score 0.5 \
+        --thr-per-file 2=0.99 --exclude 2:100-130 --polarity inward --title "hFA sEPSC review"
+```
+Snippets use the classifier's own preprocessing (`ml.core.prep_trace`: 10 kHz, 4th-order zero-phase 3 kHz low-pass) so the reviewer sees what the
+model saw; each is -100 to +200 ms around the event, median-subtracted (judge SHAPE, not amplitude). Default minimum score 0.5
+(the app shows candidates down to 0.25, so 0.25-0.5 is never sent unless you lower `--min-score`). `--thr` defaults to the lowest score the
+model accepted in that file, else 0.9. Answers are kept per package and cell in the reviewer's browser (`localStorage`), so two packages never share
+answers. Design notes and the original prototype: `docs/handoff/html_event_review/`.
+
 ## Display filter (Events tab)
 *Filter view* (on by default) low-passes what you **see** (trace, verify-card zoom, gallery) with a 4th-order zero-phase Butterworth at the
 cutoff box (default **3 kHz**, the filter type and cutoff the classifier applies; buttons for 3 kHz (CNN), 1 kHz, 500 Hz). The raw trace is drawn

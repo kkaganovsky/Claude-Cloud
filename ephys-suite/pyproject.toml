@@ -11,13 +11,18 @@ license = { text = "GPL-3.0-or-later" }
 dependencies = ["numpy", "scipy", "pyabf", "pyqtgraph", "PySide6", "openpyxl"]
 
 [project.optional-dependencies]
-test = ["pytest"]
+test = ["pytest", "playwright"]   # playwright is optional: the headless-Chrome test skips without it
 ml = ["torch", "scikit-learn"]
 
 [project.scripts]
 ephys-suite = "ephys_suite.__main__:main"
 ephys-suite-qc = "ephys_suite.qc:main"
 ephys-suite-classify = "ephys_suite.ml.infer:main"
+ephys-suite-review-export = "ephys_suite.review_export:main"
+ephys-suite-review-import = "ephys_suite.review_import:main"
 
 [tool.setuptools]
 packages = ["ephys_suite", "ephys_suite.ml"]
+
+[tool.setuptools.package-data]
+ephys_suite = ["review_page.html"]

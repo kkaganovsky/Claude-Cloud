@@ -708,6 +708,14 @@ class EventsTab(QtWidgets.QWidget):
         bs = QtWidgets.QPushButton("Save review…")
         bs.clicked.connect(self.save_review)
         rl.addWidget(bs)
+        bx = QtWidgets.QPushButton("Export for outside review (HTML)…")
+        bx.setToolTip("Write a folder a collaborator can review in any web browser (no install), then merge their answers back.")
+        bx.clicked.connect(self.open_export_dialog)
+        rl.addWidget(bx)
+        bi = QtWidgets.QPushButton("Import reviewer's results…")
+        bi.setToolTip("Merge the CSV a collaborator sent back: Yes / No are confirmed / rejected, Unsure and unanswered stay open.")
+        bi.clicked.connect(self.open_import)
+        rl.addWidget(bi)
         sv.addWidget(rg)
         sv.addStretch(1)
         return scroll(side)
@@ -1580,6 +1588,25 @@ class EventsTab(QtWidgets.QWidget):
         self.review.reviewed ^= {self.rec_i}
         self._review_label()
         self.say(f"Record {self.rec_i} {'marked' if self.rec_i in self.review.reviewed else 'unmarked'} as fully reviewed.")
+
+    def open_export_dialog(self):
+        if self.main.rec is None or self.session is None:
+            self.say("Open a recording first.", "warn")
+            return
+        from .gui_export import ExportDialog
+        dlg = ExportDialog(self)
+        if not dlg.pairs:
+            QtWidgets.QMessageBox.information(self, "Nothing to export", "No recording here has a candidates file beside it. "
+                                              "Load model candidates first (or run ephys-suite-classify).")
+            return
+        dlg.exec()
+
+    def open_import(self):
+        if self.main.rec is None:
+            self.say("Open a recording first.", "warn")
+            return
+        from .gui_export import import_flow
+        import_flow(self)
 
     def _rec_dir(self):
         """Folder of the open recording: dialogs start here so outputs land next to the data."""
