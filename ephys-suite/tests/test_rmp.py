@@ -69,3 +69,17 @@ def test_nearly_all_excluded_falls_back_to_plain_mean():
     v = add_event(t, v, 30, 30, decay=1e5)                    # never recovers: > 90 % would be excluded
     r = rmp_clean(t, v)
     assert r.keep.all() and r.rmp == pytest.approx(v.mean())
+
+
+def test_synaptic_potentials_are_not_excluded():
+    t, v0 = trace(seed=3)
+    v = v0
+    for t0 in (700, 1900, 3300):                                  # EPSP-like: fast 3-5 mV rise, decays in tens of ms
+        v = add_event(t, v, t0, 4.0, rise=2.0, decay=25.0)
+    r = rmp_clean(t, v)
+    assert r.events == [] and r.pct_excluded == 0 and r.rmp == pytest.approx(v.mean())
+    # lowering min_amp_mV brings the old behaviour back
+    assert len(rmp_clean(t, v, p=RmpParams(min_amp_mV=2.0)).events) == 3
+    # a spike on the same trace is still caught
+    v = add_event(t, v, 2600, 40.0, rise=1.5, decay=2.0, ahp=3.0)
+    assert len(rmp_clean(t, v).events) == 1

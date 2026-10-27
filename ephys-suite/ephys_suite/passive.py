@@ -178,14 +178,16 @@ def _fit_window(t, v, r: SweepPassive, p: PassiveParams):
 
 @dataclass
 class RmpParams:
-    """Broad spike / event exclusion for the resting membrane potential.
+    """Spike exclusion for the resting membrane potential, broad enough to catch small spikes that never reach 0 mV but not synaptic events.
 
-    An event is any fast rise (rise_mV within rise_ms; default 2.5 mV in 5 ms = 0.5 mV/ms, against ~0.06 mV/ms for slow drifts), whatever its
-    amplitude, so small spikes that never reach 0 mV are caught. The excluded window runs from the foot of the rising phase (walking back to
+    A candidate is any fast rise (rise_mV within rise_ms; default 2.5 mV in 5 ms = 0.5 mV/ms, against ~0.06 mV/ms for slow drifts). It is excluded
+    only if its peak is at least min_amp_mV above the pre-event baseline (default 10 mV: spikes in the recordings checked were 22-73 mV, EPSP/PSP-like
+    deflections 3-4 mV), so PSPs stay in the RMP. The excluded window runs from the foot of the rising phase (walking back to
     within foot_mV of the pre-event baseline, at most max_back ms) minus pre_pad, to the return to within return_mV of the baseline after the
     peak (at most max_tail ms) plus post_pad (afterhyperpolarisation / recovery)."""
     exclude_events: bool = True
     rise_mV: float = 2.5
+    min_amp_mV: float = 10.0          # smaller deflections are synaptic potentials, not spikes: kept
     rise_ms: float = 5.0
     smooth_ms: float = 0.5
     foot_mV: float = 0.5
@@ -232,9 +234,11 @@ def _event_mask(t, v, p: RmpParams):
         e = pk
         while e < min(n - 1, pk + int(round(p.max_tail / dt))) and abs(vs[e] - base) > p.return_mV:
             e += 1                                                                  # back to baseline (from above or below)
-        a, b = max(0, s - int(round(p.pre_pad / dt))), min(n, e + int(round(p.post_pad / dt)))
-        mask[a:b] = True
-        events.append((float(t[s]), float(t[pk]), float(t[e]), float(vs[pk] - base)))
+        amp = float(vs[pk] - base)
+        if amp >= p.min_amp_mV:
+            a, b = max(0, s - int(round(p.pre_pad / dt))), min(n, e + int(round(p.post_pad / dt)))
+            mask[a:b] = True
+            events.append((float(t[s]), float(t[pk]), float(t[e]), amp))
         j = i
         while j < len(trig) and trig[j] < e:
             j += 1
