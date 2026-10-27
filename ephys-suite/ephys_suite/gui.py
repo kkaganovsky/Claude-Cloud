@@ -537,6 +537,17 @@ class SpikesTab(QtWidgets.QWidget):
 
 
 # --------------------------------------------------------------------------------------------------- Events
+class MarkerScatter(pg.ScatterPlotItem):
+    """Markers that are drawn only. A plain ScatterPlotItem accepts the click on any of its points, so the view box (and our own
+    hit test for events, orange rings and possible misses) never got the click."""
+
+    def mouseClickEvent(self, ev):
+        ev.ignore()
+
+    def hoverEvent(self, ev):
+        pass
+
+
 class EventViewBox(pg.ViewBox):
     """ViewBox that hands clicks / drags to the Events tab first (add, select, delete, baseline), else behaves normally."""
 
@@ -573,6 +584,7 @@ class EventsTab(QtWidgets.QWidget):
         self.session = None
         self.review = None              # MR.ReviewState while model events are loaded
         self.sel = None                 # selected (primed) event
+        self._primed = False            # True when the selection came from a click (a second click then deletes)
         self.pending = None             # (record, peak_idx) waiting for a baseline click, or ('edit', event)
         self.settings = QtCore.QSettings("ephys-suite", "events")
         self._busy = False
@@ -779,13 +791,13 @@ class EventsTab(QtWidgets.QWidget):
         self.vb.disableAutoRange()                      # the window you set (or remembered) must not be reset by the data
         self.thr_line = pg.InfiniteLine(angle=0, pen=pg.mkPen(RED, style=Qt.DashLine))
         self.pd.addItem(self.thr_line)
-        self.sc_peak = pg.ScatterPlotItem(size=8, pen=pg.mkPen("k"))
-        self.sc_bl = pg.ScatterPlotItem(size=6, brush=pg.mkBrush(*BLUE), pen=pg.mkPen("k"))
-        self.sc_end = pg.ScatterPlotItem(size=5, brush=pg.mkBrush(150, 0, 200), pen=pg.mkPen("k"))
-        self.sc_sel = pg.ScatterPlotItem(size=16, brush=pg.mkBrush(None), pen=pg.mkPen((0, 90, 255), width=3))
-        self.sc_pend = pg.ScatterPlotItem(size=14, brush=pg.mkBrush(255, 150, 0, 160), pen=pg.mkPen("k"))
-        self.sc_cand = pg.ScatterPlotItem(size=11, brush=pg.mkBrush(None), pen=pg.mkPen((255, 140, 0), width=2))
-        self.sc_rev = pg.ScatterPlotItem(size=24, brush=pg.mkBrush(None), pen=pg.mkPen((255, 140, 0), width=3, style=Qt.DashLine))
+        self.sc_peak = MarkerScatter(size=8, pen=pg.mkPen("k"))
+        self.sc_bl = MarkerScatter(size=6, brush=pg.mkBrush(*BLUE), pen=pg.mkPen("k"))
+        self.sc_end = MarkerScatter(size=5, brush=pg.mkBrush(150, 0, 200), pen=pg.mkPen("k"))
+        self.sc_sel = MarkerScatter(size=16, brush=pg.mkBrush(None), pen=pg.mkPen((0, 90, 255), width=3))
+        self.sc_pend = MarkerScatter(size=14, brush=pg.mkBrush(255, 150, 0, 160), pen=pg.mkPen("k"))
+        self.sc_cand = MarkerScatter(size=14, brush=pg.mkBrush(None), pen=pg.mkPen((255, 140, 0), width=2))
+        self.sc_rev = MarkerScatter(size=24, brush=pg.mkBrush(None), pen=pg.mkPen((255, 140, 0), width=3, style=Qt.DashLine))
         for it in (self.sc_end, self.sc_bl, self.sc_peak, self.sc_sel, self.sc_pend, self.sc_cand, self.sc_rev):
             it.setZValue(10)
             self.pd.addItem(it)
@@ -1190,13 +1202,13 @@ class EventsTab(QtWidgets.QWidget):
         hit = self._hit(x, y, vb)
         if hit is not None:                              # EE: first click primes (blue), second click deletes
             if self.btn_add.isChecked():                 # in Add mode a click on a marker only selects it (no accidental delete)
-                self.select(hit)
+                self.select(hit, primed=True)
                 self.say("That event is already there (selected). Press <b>Delete</b> to remove it, or leave Add mode (A) and "
                          "click it twice.", "warn")
-            elif hit is self.sel:
-                self.delete_selected()
+            elif hit is self.sel and self._primed:       # only a selection made BY CLICKING arms the delete; the verify card
+                self.delete_selected()                   # selects the item it shows, and one click on that must not remove it
             else:
-                self.select(hit)
+                self.select(hit, primed=True)
                 self.say("Event selected (blue ring). Click it again or press <b>Delete</b> to remove it; <b>B</b> moves its "
                          "baseline; ←/→ steps between events.")
             return True
@@ -1214,8 +1226,9 @@ class EventsTab(QtWidgets.QWidget):
             return True
         return False
 
-    def select(self, ev):
+    def select(self, ev, primed=False):
         self.sel = ev
+        self._primed = bool(primed) and ev is not None
         self._markers()
         if ev is not None and ev in getattr(self, "_rows", []):
             self.tbl.blockSignals(True)
@@ -1368,7 +1381,7 @@ class EventsTab(QtWidgets.QWidget):
             self.say("Undone." if undo else "Redone.")
 
     # ------------------------------------------------------------------------------------- model review
-    def _hit_cand(self, x, y, vb, radius=12):
+    def _hit_cand(self, x, y, vb, radius=18):
         if self.review is None or not self.chk_cands.isChecked():
             return None
         rec = self.main.rec
@@ -1384,9 +1397,9 @@ class EventsTab(QtWidgets.QWidget):
         return best
 
     def accept_candidate(self, c):
-        ev, why = self.session.add(c.record, c.peak_idx, fit=True)
+        ev, why = self.session.add(c.record, c.peak_idx, fit=True, confirm=True)       # a click is a decision
         if ev is None and why not in ("ok", "duplicate"):
-            ev, why = self.session.add(c.record, c.peak_idx, fit=False)
+            ev, why = self.session.add(c.record, c.peak_idx, fit=False, confirm=True)
         if ev is not None:
             self.sel = ev
             self._refresh_all()

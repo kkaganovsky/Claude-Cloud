@@ -77,8 +77,8 @@ def env(app, tmp_path):
 # ------------------------------------------------------------------------------------------ verifying events
 def test_loading_candidates_starts_at_the_least_sure_event(env):
     w, ev, kit, *_ = env
-    assert kit.mode == "lowest_score" and kit.current() is not None
-    assert kit.current().score == min(q.score for q in kit.queue)
+    assert kit.mode == "uncertain" and kit.current() is not None
+    assert kit.current().score == min(q.score for q in kit.queue if q.kind == "event") or kit.current().kind == "candidate"
     assert kit.b_yes.isEnabled() and "Confirm" in kit.b_yes.text()
     assert "to verify" in kit.lbl_stats.text()
     s = ev.session
@@ -87,6 +87,7 @@ def test_loading_candidates_starts_at_the_least_sure_event(env):
 
 def test_confirm_advances_and_counts(env):
     w, ev, kit, *_ = env
+    kit._set_mode("lowest_score")                              # events only (the default queue also holds candidates)
     n_open = len(kit.queue)
     first = kit.current().key
     kit.confirm_current()
@@ -98,6 +99,7 @@ def test_confirm_advances_and_counts(env):
 
 def test_reject_removes_event_records_decision_and_undo_jumps_back(env):
     w, ev, kit, *_ = env
+    kit._set_mode("lowest_score")
     s = ev.session
     key = kit.current().key
     n = len(s.events)
@@ -251,6 +253,7 @@ def test_minimap_geometry_click_and_drag_jump(env):
 # ---------------------------------------------------------------------------------------------- gallery
 def test_gallery_flip_and_decide_rest(env):
     w, ev, kit, *_ = env
+    kit._set_mode("lowest_score")
     kit.open_gallery()
     g = kit.gallery
     assert g.mode() == "lowest_score" and len(g.plots) == g.per_page() == 20
@@ -438,3 +441,70 @@ def test_nothing_is_counted_or_saved_while_the_events_tab_is_hidden(app, tmp_pat
     kit.autosave()                                                # now there is real review activity
     assert [f for f in os.listdir(tmp_path) if f.endswith(".review_progress.json")]
     w.close()
+
+
+# ---------------------------------------------------------------------------------------------- real mouse clicks
+def _click_at(ev, rec, idx, app):
+    """A genuine left click on the plot at the data point (rec, idx), through Qt's event system (not a direct call)."""
+    from PySide6 import QtCore
+    from PySide6.QtTest import QTest
+    t = ev.main.rec.t[idx]
+    y = ev.session.Y[rec][idx]
+    ev.spin.setValue(rec)
+    ev._set_view(max(0.0, t - 300), 600.0)
+    app.processEvents()
+    vp = ev.pd.mapFromScene(ev.vb.mapViewToScene(QtCore.QPointF(t, y)))
+    QTest.mouseClick(ev.pd.viewport(), Qt.LeftButton, Qt.NoModifier, vp)
+    app.processEvents()
+
+
+def test_clicking_an_orange_ring_with_the_mouse_accepts_it(env, app):
+    w, ev, kit, *_ = env
+    c = next(c for c in ev.review.cands if not c.accepted and c.score >= 0.25)
+    n0 = len(ev.session.events)
+    _click_at(ev, c.record, c.peak_idx, app)
+    assert len(ev.session.events) == n0 + 1                           # a plain ScatterPlotItem swallowed this click before
+    added = ev.session.find_event(c.record, c.peak_idx)
+    assert added is not None and ev.session.is_verified(added)        # the click is itself a decision
+
+
+def test_clicking_an_event_with_the_mouse_selects_then_removes_it(env, app):
+    w, ev, kit, *_ = env
+    e = next(e for e in ev.session.events if e.record == 0)
+    n0 = len(ev.session.events)
+    ev.select(e)                                                       # what the verify card does: selected, but NOT armed
+    _click_at(ev, e.record, e.peak_idx, app)
+    assert ev.sel is e and len(ev.session.events) == n0                # first click on it only arms it
+    _click_at(ev, e.record, e.peak_idx, app)
+    assert len(ev.session.events) == n0 - 1                            # second click removes it
+
+
+def test_uncertain_queue_mixes_events_and_candidates_by_closeness_to_the_threshold(env):
+    w, ev, kit, *_ = env
+    kinds = {q.kind for q in kit.queue}
+    assert kit.mode == "uncertain" and kinds == {"event", "candidate"}
+    thr = MR._logit(ev.review.thr)
+    d = [abs(MR._logit(q.score) - thr) for q in kit.queue if q.score == q.score]
+    assert d == sorted(d)                                              # most doubtful first, whichever side of the threshold
+    first = kit.current()
+    kit.confirm_current() if first.kind == "event" else kit.confirm_current()
+    assert first.key not in {q.key for q in kit.queue}
+
+
+def test_card_zoom_window_is_on_screen_with_data_for_every_item_kind(env, app):
+    """Regression: the zoom under the Verify toolbar sat below the fold of the card (it scrolled out of sight)."""
+    w, ev, kit, *_ = env
+    w.resize(1366, 760)
+    app.processEvents()
+    for mode in ("uncertain", "lowest_score", "borderline"):
+        kit._set_mode(mode)
+        kit._after_change()
+        app.processEvents()
+        if kit.current() is None:
+            continue
+        pi = kit.zoom.getPlotItem()
+        assert any(getattr(i, "xData", None) is not None and len(i.xData) > 10 for i in pi.items), mode          # the snippet trace is drawn
+        top = kit.zoom.mapTo(kit.card, kit.zoom.rect().topLeft()).y()
+        bottom = top + kit.zoom.height()
+        assert top >= 0 and bottom <= kit.card.viewport().height(), (mode, top, bottom)       # inside the visible part of the card
+        assert kit.b_yes.mapTo(kit.card, kit.b_yes.rect().bottomLeft()).y() <= kit.card.viewport().height()   # buttons visible too

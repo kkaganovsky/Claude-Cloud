@@ -297,8 +297,12 @@ class GalleryDialog(QtWidgets.QDialog):
         n = self.per_page()
         mode = self.mode()
         events_mode = mode in ("lowest_score", "time")
-        self.b_rest.setText("Confirm the rest and next page (Enter)" if events_mode else "Dismiss the rest and next page (Enter)")
-        self.hint.setText(("Click a thumbnail to <b>reject</b> that event (click again to bring it back). Everything you leave alone is "
+        mixed = mode == "uncertain"
+        self.b_rest.setText("Decide the rest and next page (Enter)" if mixed else
+                            "Confirm the rest and next page (Enter)" if events_mode else "Dismiss the rest and next page (Enter)")
+        self.hint.setText(("Click a thumbnail to <b>flip</b> it: events (red dot) are rejected, candidates (orange dot) are added. "
+                           "Enter confirms the events and dismisses the candidates you left alone." if mixed else
+                           "Click a thumbnail to <b>reject</b> that event (click again to bring it back). Everything you leave alone is "
                            "confirmed when you press Enter." if events_mode else
                            "Click a thumbnail to <b>add</b> it as an event (click again to remove it). Everything you leave alone is "
                            "dismissed as 'not an event' when you press Enter."))
@@ -407,6 +411,7 @@ class VerifyKit(QtCore.QObject):
         self.split.setStretchFactor(0, 4)
         self.split.setStretchFactor(1, 1)
         self.split.setSizes([900, 330])
+        self.split.setMinimumHeight(430)                  # room for the card's zoom window AND its buttons (else the zoom scrolls out of sight)
         host.insertWidget(i, self.split, 4)
         self.mm = Minimap(self)
         self.lbl_cov = QtWidgets.QLabel()
@@ -414,12 +419,12 @@ class VerifyKit(QtCore.QObject):
         self.lbl_cov.setWordWrap(True)
         host.insertWidget(i + 1, self.mm)
         host.insertWidget(i + 2, self.lbl_cov)
-        from .gui import register_panels
+        from .gui import MarkerScatter, register_panels
         register_panels(tab.main, "events", "Events tab", [("card", "Verify card (right of the trace)", self.card),
                                                           ("strip", "Overview strip and coverage", [self.mm, self.lbl_cov])])
         # markers drawn on the main plot
-        self.sc_sus = pg.ScatterPlotItem(size=12, symbol="d", brush=pg.mkBrush(None), pen=pg.mkPen(*PURPLE, width=2))
-        self.sc_cur = pg.ScatterPlotItem(size=28, brush=pg.mkBrush(None), pen=pg.mkPen(*ORANGE, width=3, style=Qt.DashLine))
+        self.sc_sus = MarkerScatter(size=12, symbol="d", brush=pg.mkBrush(None), pen=pg.mkPen(*PURPLE, width=2))
+        self.sc_cur = MarkerScatter(size=28, brush=pg.mkBrush(None), pen=pg.mkPen(*ORANGE, width=3, style=Qt.DashLine))
         for it in (self.sc_sus, self.sc_cur):
             it.setZValue(9)
             tab.pd.addItem(it)
@@ -429,8 +434,6 @@ class VerifyKit(QtCore.QObject):
         w.setMinimumWidth(260)
         v = QtWidgets.QVBoxLayout(w)
         v.setContentsMargins(4, 0, 0, 0)
-        head = QtWidgets.QLabel("<b>Verify</b>")
-        v.addWidget(head)
         self.cb_mode = QtWidgets.QComboBox()
         for k, t in V.MODES.items():
             self.cb_mode.addItem(t, k)
@@ -440,7 +443,15 @@ class VerifyKit(QtCore.QObject):
         self.lbl_title = QtWidgets.QLabel()
         self.lbl_title.setWordWrap(True)
         v.addWidget(self.lbl_title)
-        # decisions first: they stay reachable on a short screen where the card scrolls
+        self.zoom = pg.PlotWidget()
+        self.zoom.showGrid(x=True, y=True, alpha=0.2)
+        self.zoom.setMinimumHeight(140)
+        self.zoom.setMaximumHeight(200)
+        self.zoom.setMenuEnabled(False)
+        for ax in ("left", "bottom"):
+            self.zoom.getAxis(ax).enableAutoSIPrefix(False)
+        v.addWidget(self.zoom)
+        # the decision buttons sit right under the zoom window, both inside the first screenful of the card
         row = QtWidgets.QHBoxLayout()
         self.b_yes = QtWidgets.QPushButton("✓ Confirm (Y)")
         self.b_no = QtWidgets.QPushButton("✗ Reject (N)")
@@ -461,13 +472,6 @@ class VerifyKit(QtCore.QObject):
         b.clicked.connect(lambda: self.step(+1))
         row.addWidget(b)
         v.addLayout(row)
-        self.zoom = pg.PlotWidget()
-        self.zoom.showGrid(x=True, y=True, alpha=0.2)
-        self.zoom.setMinimumHeight(150)
-        self.zoom.setMenuEnabled(False)
-        for ax in ("left", "bottom"):
-            self.zoom.getAxis(ax).enableAutoSIPrefix(False)
-        v.addWidget(self.zoom, 1)
         self.lbl_info = QtWidgets.QLabel()
         self.lbl_info.setWordWrap(True)
         self.lbl_info.setTextFormat(Qt.RichText)
@@ -549,7 +553,7 @@ class VerifyKit(QtCore.QObject):
         self._announced_done.clear()
         self.hist = []
         self.cb_mode.blockSignals(True)
-        self.mode = "lowest_score"
+        self.mode = "uncertain"
         self.cb_mode.setCurrentIndex(self.cb_mode.findData(self.mode))
         self.cb_mode.blockSignals(False)
         d = self.saved()
@@ -676,7 +680,7 @@ class VerifyKit(QtCore.QObject):
         self.focus(self.current(), recenter=True)
 
     def next_to_verify(self):
-        self._set_mode("lowest_score" if self.review is not None else "time")
+        self._set_mode("uncertain" if self.review is not None else "time")
         self._after_change()
         self.pos = 0 if self.queue else -1
         self.focus(self.current(), recenter=True)
@@ -896,7 +900,7 @@ class VerifyKit(QtCore.QObject):
     def _draw_card(self, item):
         s = self.session
         self.zoom.clear()
-        titles = {"lowest_score": "least sure first", "time": "time order", "borderline": "closest to the threshold first",
+        titles = {"uncertain": "closest to the model's threshold first", "lowest_score": "least sure first", "time": "time order", "borderline": "closest to the threshold first",
                   "suspects": "strongest first"}
         qn = len(self.queue)
         if item is None:

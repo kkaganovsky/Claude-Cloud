@@ -131,8 +131,9 @@ In the Events tab, in the left panel's *Review model events* group press **Load 
 - **Verify card** (right): the current item zoomed, with the baseline, peak, score, SNR, gap to the previous event, and a green
   line = typical event scaled to this amplitude, so a wrong shape stands out. **Y / Enter** confirm, **N** reject, **.** skip,
   **,** back. Counts at the bottom of the card show what is still open.
-- **Queue** drop-down: model events least sure first (default), all events in time order, borderline candidates, possible
-  missed events.
+- **Queue** drop-down: *Uncertain* (default: accepted events and borderline candidates in one list, most doubtful first; **Y** confirms an
+  event or accepts a candidate, **N** rejects an event or dismisses a candidate), model events least sure first, all events in time
+  order, borderline candidates, possible missed events. Clicking an orange ring on the trace accepts it directly.
 - **Gallery (G)**: 20 thumbnails per page on the same Y scale. Click one to flip it; **Enter** confirms everything you left alone and turns the
   page.
 

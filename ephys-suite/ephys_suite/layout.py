@@ -71,9 +71,22 @@ class FlowLayout(QtWidgets.QLayout):
         return y + line_h - rect.y() + m.bottom()
 
 
+class FlowRow(QtWidgets.QWidget):
+    """Holds a FlowLayout and keeps its own minimum height equal to the wrapped height, so the layout above never squeezes
+    a wrapped toolbar into the widgets below it (Qt only knows the wrapped height once the width is fixed)."""
+
+    def resizeEvent(self, ev):
+        super().resizeEvent(ev)
+        lay = self.layout()
+        if lay is not None:
+            h = lay.heightForWidth(self.width())
+            if h != self.minimumHeight():
+                self.setMinimumHeight(h)
+
+
 def flow_row(*items):
     """A QWidget holding the given widgets in a wrapping row. Plain strings become labels."""
-    w = QtWidgets.QWidget()
+    w = FlowRow()
     lay = FlowLayout(w)
     for it in items:
         lay.addWidget(QtWidgets.QLabel(it) if isinstance(it, str) else it)
@@ -139,7 +152,7 @@ def remember_window(win, settings):
 
 def scrolling_central(content, min_size=MIN_CONTENT):
     """Wrap the tab widget so a small screen gets scroll bars instead of clipped controls."""
-    content.setMinimumSize(*min_size)
+    content.setMinimumWidth(min_size[0])      # the height comes from the layouts themselves (never forced below what they need)
     s = QtWidgets.QScrollArea()
     s.setWidgetResizable(True)
     s.setFrameShape(QtWidgets.QFrame.NoFrame)

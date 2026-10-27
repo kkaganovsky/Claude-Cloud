@@ -22,6 +22,7 @@ from . import events as E
 from . import model_review as MR
 
 MODES = {
+    "uncertain": "Uncertain: events and candidates, least sure first",
     "lowest_score": "Model events: least sure first",
     "time": "All events: in time order",
     "borderline": "Borderline model candidates",
@@ -170,6 +171,16 @@ def build_queue(mode: str, session: E.EventSession, review: Optional[MR.ReviewSt
                 suspects: Optional[List[Suspect]] = None, include_done: bool = False) -> List[QItem]:
     tol = max(1, int(round(4.0 / session.ts)))
     items: List[QItem] = []
+    if mode == "uncertain":
+        # ONE list: accepted events and borderline candidates, ordered by how close the model's score is to its own threshold
+        # (either side), so every decision that could go either way comes first. Events the model never scored come last.
+        evs = build_queue("lowest_score", session, review, suspects, include_done)
+        cands = build_queue("borderline", session, review, suspects, include_done)
+        thr = MR._logit(review.thr) if review is not None else 0.0
+
+        def dist(q):
+            return (math.isnan(q.score), abs(MR._logit(q.score) - thr) if not math.isnan(q.score) else 0.0, q.record, q.peak_idx)
+        return sorted(evs + cands, key=dist)
     if mode in ("lowest_score", "time"):
         for e in session.events:
             if not include_done and session.is_verified(e):
