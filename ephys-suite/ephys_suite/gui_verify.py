@@ -308,7 +308,7 @@ class GalleryDialog(QtWidgets.QDialog):
                            "dismissed as 'not an event' when you press Enter."))
         chunk = self.items[self.page * n:(self.page + 1) * n]
         pre, post = self.pre.value(), self.post.value()
-        snips = [V.snippet(s, it.record, it.peak_idx, pre, post) for it in chunk]
+        snips = [V.snippet(s, it.record, it.peak_idx, pre, post, source=k.tab.display_y) for it in chunk]
         ghost = V.ghost_template(s, pre_ms=pre, post_ms=post)
         lo = min((float(y.min()) for _, y, _ in snips), default=0.0)
         hi = max((float(y.max()) for _, y, _ in snips), default=1.0)
@@ -532,6 +532,14 @@ class VerifyKit(QtCore.QObject):
         sc("E", self.next_to_verify)
 
     # ------------------------------------------------------------------------------------ hooks from the tab
+    def refresh_display(self):
+        """The display filter changed: redraw the card's zoom and, if open, the gallery page."""
+        if self.session is None:
+            return
+        self._draw_card(self.current())
+        if self.gallery is not None and self.gallery.isVisible():
+            self.gallery.draw()
+
     def on_session_reset(self):
         s = self.session
         self.cov = V.Coverage([s.Y.shape[1] * s.ts] * s.Y.shape[0]) if s is not None else None
@@ -909,7 +917,7 @@ class VerifyKit(QtCore.QObject):
             self._buttons(None)
             return
         self.lbl_title.setText(f"<b>{V.MODES[self.mode]}</b> ({titles[self.mode]})<br>item {self.pos + 1} of {qn} still open")
-        tr, y, i0 = V.snippet(s, item.record, item.peak_idx)
+        tr, y, i0 = V.snippet(s, item.record, item.peak_idx, source=self.tab.display_y)
         tol = max(1, int(round(4.0 / s.ts)))
         ev = s.find_event(item.record, item.peak_idx, tol)
         base = ev.bl_im if ev is not None else V.local_baseline(s, item.record, item.peak_idx)

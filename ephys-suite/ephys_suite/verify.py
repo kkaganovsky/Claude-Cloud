@@ -250,12 +250,13 @@ def record_ready_to_mark(session: E.EventSession, record: int, cov: Optional[Cov
 
 
 # -------------------------------------------------------------------------------------------- zoom card data
-def snippet(session: E.EventSession, record: int, peak_idx: int, pre_ms: float = 25.0, post_ms: float = 60.0):
-    """(t_rel_ms, y, i_peak_in_window) around a peak, t_rel = 0 at the peak."""
+def snippet(session: E.EventSession, record: int, peak_idx: int, pre_ms: float = 25.0, post_ms: float = 60.0, source=None):
+    """(t_rel_ms, y, i_peak_in_window) around a peak, t_rel = 0 at the peak. `source(record)` may supply a display-filtered trace."""
     ts = session.ts
     a = max(0, peak_idx - int(round(pre_ms / ts)))
     b = min(session.Y.shape[1], peak_idx + int(round(post_ms / ts)) + 1)
-    return (np.arange(a, b) - peak_idx) * ts, session.Y[record][a:b], peak_idx - a
+    y = source(record) if source is not None else session.Y[record]
+    return (np.arange(a, b) - peak_idx) * ts, y[a:b], peak_idx - a
 
 
 def local_baseline(session: E.EventSession, record: int, peak_idx: int) -> float:

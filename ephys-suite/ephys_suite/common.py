@@ -6,6 +6,14 @@ from scipy.optimize import least_squares
 from scipy import signal
 
 
+def lowpass_zero_phase(y, fs_hz: float, cutoff_hz: float, order: int = 4):
+    """4th-order Butterworth, zero phase (sosfiltfilt): the same filter type the sEPSC classifier applies (ml/core.py, 3 kHz).
+    Returns `y` unchanged when the cutoff is off (<= 0) or too close to Nyquist to filter anything."""
+    if not cutoff_hz or cutoff_hz <= 0 or cutoff_hz >= 0.45 * fs_hz:
+        return y
+    return signal.sosfiltfilt(signal.butter(order, cutoff_hz, "low", fs=fs_hz, output="sos"), np.asarray(y, float))
+
+
 def ts_ms(t) -> float:
     return float(t[1] - t[0])
 

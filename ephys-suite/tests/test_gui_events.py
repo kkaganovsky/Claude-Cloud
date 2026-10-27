@@ -180,3 +180,37 @@ def test_first_view_shows_the_signal_without_any_setup(win):
     ev._new_session()
     assert ev.vy1.value() - med > med - ev.vy0.value()
     ev.p.direction = -1
+
+
+# ---------------------------------------------------------------------------------------------- display filter
+def test_lowpass_matches_the_classifier_filter_and_is_zero_phase():
+    import numpy as np
+    from ephys_suite.common import lowpass_zero_phase
+    from ephys_suite.ml import core
+    fs = 20000.0
+    t = np.arange(0, 1.0, 1 / fs)
+    slow, fast = np.sin(2 * np.pi * 100 * t), np.sin(2 * np.pi * 8000 * t)
+    y = lowpass_zero_phase(slow + fast, fs, 3000.0)
+    assert np.max(np.abs(y[200:-200] - slow[200:-200])) < 0.05                    # 8 kHz removed, 100 Hz kept, no delay
+    assert lowpass_zero_phase(slow, fs, 0) is slow and lowpass_zero_phase(slow, fs, 9500) is slow   # off / above Nyquist
+    assert core.LPF_HZ == 3000.0                                                    # the default cutoff is the CNN's
+
+
+def test_display_filter_defaults_to_the_cnn_cutoff_and_never_touches_the_analysis(win):
+    import numpy as np
+    w, ev = win[0], win[1]
+    assert ev.chk_filt.isChecked() and ev.sp_filt.value() == 3000.0
+    raw = ev.session.Y[ev.rec_i]
+    shown = ev.display_y(ev.rec_i)
+    assert shown is not raw and shown.shape == raw.shape and np.std(np.diff(shown)) < np.std(np.diff(raw))
+    n = len(ev.session.events)
+    ev.sp_filt.setValue(500)
+    assert len(ev.session.events) == n and np.array_equal(ev.session.Y[ev.rec_i], raw)       # raw data and events untouched
+    assert np.std(np.diff(ev.display_y(ev.rec_i))) < np.std(np.diff(shown))                  # 500 Hz is smoother than 3 kHz
+    assert np.array_equal(np.asarray(ev.curve.yData), ev.display_y(ev.rec_i))
+    ev.chk_filt.setChecked(False)
+    assert np.array_equal(ev.display_y(ev.rec_i), raw) and len(ev.raw_curve.yData if ev.raw_curve.yData is not None else []) == 0
+    ev.chk_filt.setChecked(True)
+    for text, hz in (("1 kHz", 1000), ("500 Hz", 500), ("3 kHz (CNN)", 3000)):
+        next(b for b in ev.w_filter.findChildren(QtWidgets.QToolButton) if b.text() == text).click()
+        assert ev.sp_filt.value() == hz and ev.chk_filt.isChecked()

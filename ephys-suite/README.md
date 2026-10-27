@@ -166,6 +166,12 @@ licensing is acceptable for your use before redistributing.
 ## Reviewing classifier-proposed events
 The Events tab can load a candidates CSV from the sEPSC classifier (columns `sweep, time_in_sweep_ms, score, accepted`): accepted candidates become the event set, borderline ones are orange rings you click to accept, **R** steps through the most uncertain candidates, **M** marks a record fully reviewed, and *Save review…* writes the final decisions for retraining (see `model_review.py`).
 
+## Display filter (Events tab)
+*Filter view* (on by default) low-passes what you **see** (trace, verify-card zoom, gallery) with a 4th-order zero-phase Butterworth at the
+cutoff box (default **3 kHz**, the filter type and cutoff the classifier applies; buttons for 3 kHz (CNN), 1 kHz, 500 Hz). The raw trace is drawn
+faintly underneath. It is display only: detection, thresholds, measurements, markers and the saved review all use the raw trace
+(markers sit at raw peak heights, so they can float slightly off a heavily filtered peak). The classifier also resamples to 10 kHz, which is not reproduced.
+
 ## Associated events file
 Opening a recording looks beside it (and in a `candidates/` or `review/` subfolder) for `<name>.candidates.csv`, `<name>_review.csv` or
 `<name>.review.csv` with the candidate columns, and **asks** whether to load the newest one (never loads silently; a saved

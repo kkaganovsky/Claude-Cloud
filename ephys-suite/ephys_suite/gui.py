@@ -15,7 +15,7 @@ from . import kinetics as K
 from . import passive as P
 from . import report as R
 from . import spikes as S
-from .common import idx_at, ts_ms, window_mean
+from .common import idx_at, lowpass_zero_phase, ts_ms, window_mean
 from .io import current_source, load_abf, sibling_abfs
 from . import layout as LY
 from . import style as ST
@@ -595,6 +595,7 @@ class EventsTab(QtWidgets.QWidget):
         register_panels(main, "events", "Events tab", [
             ("settings", "Settings column", self.side), ("edit", "Edit toolbar (add / baseline / delete / undo)", self.w_edit),
             ("hint", "Hint line", self.hint), ("view", "View controls (record, X / Y limits)", self.w_view),
+            ("filter", "Display filter (low-pass)", self.w_filter),
             ("measure", "Detection measure plot", self.pm), ("plots", "Aligned events and cumulative plots", self.bot),
             ("table", "Events table", self.tbl)])
         self._shortcuts()
@@ -768,6 +769,32 @@ class EventsTab(QtWidgets.QWidget):
                                   LY.labeled("X start ms", self.vx), LY.labeled("width ms", self.vw),
                                   LY.labeled("Y min", self.vy0), LY.labeled("Y max", self.vy1), self.chk_locky, self.b_fity, self.b_save)
         v.addWidget(self.w_view)
+        # --- display filter
+        self.chk_filt = QtWidgets.QCheckBox("Filter view")
+        self.chk_filt.setChecked(str(self.settings.value("filter_on", True)).lower() not in ("false", "0"))
+        self.sp_filt = QtWidgets.QDoubleSpinBox()
+        self.sp_filt.setRange(20, 20000)
+        self.sp_filt.setDecimals(0)
+        self.sp_filt.setSuffix(" Hz")
+        self.sp_filt.setKeyboardTracking(False)
+        self.sp_filt.setValue(float(self.settings.value("filter_hz", 3000.0)))
+        tip = ("Low-pass (4th-order Butterworth, zero phase) for what you SEE in the trace, the verify card and the gallery. "
+               "3 kHz is the filter the sEPSC classifier applies, so the display matches what it sees "
+               "(it also resamples to 10 kHz, which is not reproduced here). Detection, thresholds and all measurements still use the raw "
+               "trace; the raw trace is drawn faintly underneath.")
+        self.chk_filt.setToolTip(tip)
+        self.sp_filt.setToolTip(tip)
+        quick = []
+        for hz, label in ((3000, "3 kHz (CNN)"), (1000, "1 kHz"), (500, "500 Hz")):
+            b = self._tool(label, f"Low-pass the display at {hz} Hz", checkable=False)
+            b.clicked.connect(lambda _=False, hz=hz: (self.chk_filt.setChecked(True), self.sp_filt.setValue(hz)))
+            quick.append(b)
+        self.chk_filt.toggled.connect(self._filter_changed)
+        self.sp_filt.valueChanged.connect(self._filter_changed)
+        self.w_filter = LY.flow_row(self.chk_filt, LY.labeled("cutoff", self.sp_filt), *quick,
+                                    QtWidgets.QLabel("display only: analysis uses raw"))
+        v.addWidget(self.w_filter)
+        self._disp_cache = {}
         # --- plots
         right = QtWidgets.QSplitter(Qt.Vertical)
         top = QtWidgets.QWidget()
@@ -785,6 +812,9 @@ class EventsTab(QtWidgets.QWidget):
         self.pd.setMinimumHeight(260)                   # the trace never gets squeezed away by the other panels
         for ax in ("left", "bottom"):
             self.pd.getAxis(ax).enableAutoSIPrefix(False)
+        self.raw_curve = self.pd.plot([], [], pen=pg.mkPen(185, 185, 185, 200, width=1))     # raw trace, faint, under the filtered one
+        self.raw_curve.setClipToView(True)
+        self.raw_curve.setDownsampling(auto=True, method="peak")
         self.curve = self.pd.plot([], [], pen=pg.mkPen((40, 40, 40), width=1))
         self.curve.setClipToView(True)
         self.curve.setDownsampling(auto=True, method="peak")
@@ -939,6 +969,7 @@ class EventsTab(QtWidgets.QWidget):
             return
         self.sel, self.pending = None, None
         self.review = None
+        self._disp_cache = {}
         if hasattr(self, "lbl_review"):
             self.lbl_review.setText("No model events loaded.")
         self.p.direction = int(self.p.direction)
@@ -980,13 +1011,48 @@ class EventsTab(QtWidgets.QWidget):
             self.sel = None
             self._refresh_all()
 
+    # ---------------------------------------------------------------------------------------- display filter
+    def filter_hz(self):
+        return float(self.sp_filt.value()) if self.chk_filt.isChecked() else 0.0
+
+    def display_y(self, record):
+        """The trace as displayed: raw, or low-passed at the display cutoff (cached per record)."""
+        raw = self.session.Y[record]
+        hz = self.filter_hz()
+        if hz <= 0:
+            return raw
+        key = (record, hz)
+        if key not in self._disp_cache:
+            if len(self._disp_cache) > 12:
+                self._disp_cache.clear()
+            self._disp_cache[key] = lowpass_zero_phase(raw, 1000.0 / self.session.ts, hz)
+        return self._disp_cache[key]
+
+    def _draw_trace(self, t, raw):
+        shown = self.display_y(self.rec_i)
+        self.curve.setData(t, shown)
+        if self.filter_hz() <= 0:
+            self.raw_curve.setData([], [])
+        else:
+            self.raw_curve.setData(t, raw)
+
+    def _filter_changed(self, *_):
+        self.settings.setValue("filter_on", bool(self.chk_filt.isChecked()))
+        self.settings.setValue("filter_hz", float(self.sp_filt.value()))
+        if self.session is None or self.main.rec is None:
+            return
+        self._draw_trace(self.main.rec.t, self.session.Y[self.rec_i])
+        kit = getattr(self, "kit", None)
+        if kit is not None:
+            kit.refresh_display()
+
     # ---------------------------------------------------------------------------------------- plotting
     def _load_record(self, reset_x):
         rec = self.main.rec
         if rec is None or self.session is None:
             return
         y = self.session.Y[self.rec_i]
-        self.curve.setData(rec.t, y)
+        self._draw_trace(rec.t, y)
         self.vb.disableAutoRange()
         line = E._lower_threshold_line(rec.t, y, self.p)
         if line is not None and self.p.lower_mode != "none":
@@ -1135,7 +1201,7 @@ class EventsTab(QtWidgets.QWidget):
         t = self.main.rec.t
         (x0, x1), _ = self.vb.viewRange()
         i, j = idx_at(t, x0), idx_at(t, x1)
-        seg = self.session.Y[self.rec_i][i:j + 1]
+        seg = self.display_y(self.rec_i)[i:j + 1]
         if seg.size:
             pad = 0.08 * max(float(np.ptp(seg)), 1.0)
             self._busy = True
