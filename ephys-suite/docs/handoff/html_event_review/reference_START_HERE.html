@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sEPSC Event Review</title>
+<style>
+  :root { --bg:#f6f7f9; --panel:#ffffff; --ink:#1d2330; --muted:#6b7280; --line:#e3e6eb;
+          --yes:#1f9d55; --no:#d64545; --unsure:#7c5cc4; --maybe:#e08a00; --trace:#1d2330; --accent:#2563eb; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.45 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:14px 20px; background:var(--panel); border-bottom:1px solid var(--line); display:flex; align-items:baseline; gap:16px; flex-wrap:wrap; }
+  header h1 { font-size:19px; margin:0; }
+  header span { color:var(--muted); font-size:13px; }
+  .wrap { display:flex; gap:16px; padding:16px 20px; align-items:flex-start; }
+  aside { width:250px; flex:none; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px; }
+  aside h2 { font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:4px 6px 8px; }
+  .cell { display:block; width:100%; text-align:left; border:1px solid transparent; background:none; border-radius:8px; padding:8px 10px; cursor:pointer; font:inherit; color:inherit; }
+  .cell:hover { background:#f0f3f8; }
+  .cell.active { border-color:var(--accent); background:#eef3ff; }
+  .cell b { display:block; font-size:14px; }
+  .cell small { color:var(--muted); }
+  .cell .bar { height:4px; background:var(--line); border-radius:2px; margin-top:5px; overflow:hidden; }
+  .cell .bar i { display:block; height:100%; background:var(--yes); width:0; }
+  main { flex:1; min-width:0; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  .top { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px; }
+  .title { font-size:17px; font-weight:600; }
+  .tier { display:inline-block; padding:2px 10px; border-radius:20px; font-size:13px; font-weight:600; color:#fff; margin-left:8px; }
+  .tier.detected { background:var(--yes); } .tier.maybe { background:var(--maybe); }
+  .done { display:inline-block; padding:2px 10px; border-radius:20px; font-size:13px; font-weight:600; margin-left:6px; border:1.5px solid; }
+  canvas { width:100%; height:380px; display:block; background:#fff; border:1px solid var(--line); border-radius:8px; }
+  .opts { display:flex; gap:18px; flex-wrap:wrap; margin:10px 2px; color:var(--muted); font-size:14px; }
+  .opts label { cursor:pointer; }
+  .btns { display:flex; gap:10px; flex-wrap:wrap; margin-top:6px; }
+  .btns button, .save button { font:inherit; font-weight:600; border:none; border-radius:9px; padding:13px 20px; cursor:pointer; color:#fff; }
+  .b-yes { background:var(--yes); } .b-no { background:var(--no); } .b-unsure { background:var(--unsure); }
+  .b-nav { background:#e9ecf1; color:var(--ink) !important; }
+  button:disabled { opacity:.45; cursor:default; }
+  kbd { font:12px ui-monospace, Menlo, monospace; background:rgba(255,255,255,.25); border-radius:4px; padding:1px 5px; margin-left:6px; }
+  .b-nav kbd { background:#d5dae2; }
+  .prog { margin-top:14px; color:var(--muted); font-size:14px; }
+  .prog .bar { height:8px; background:var(--line); border-radius:4px; overflow:hidden; margin-top:6px; }
+  .prog .bar i { display:block; height:100%; background:var(--yes); width:0; }
+  .save { display:flex; gap:10px; flex-wrap:wrap; margin-top:16px; padding-top:14px; border-top:1px solid var(--line); align-items:center; }
+  .save button { background:var(--accent); }
+  .save .b-nav { background:#e9ecf1; }
+  .msg { color:var(--muted); font-size:13px; }
+  .empty { padding:60px 20px; text-align:center; color:var(--muted); }
+  .help { margin-top:16px; font-size:14px; color:var(--muted); }
+  .help li { margin:3px 0; }
+  @media (max-width: 800px) { .wrap { flex-direction:column; } aside { width:100%; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>sEPSC event review</h1>
+  <span>Look at each event and answer: is this a real synaptic event? Your answers save automatically in this browser.</span>
+</header>
+<div class="wrap">
+  <aside>
+    <h2>Cells</h2>
+    <div id="cells"></div>
+  </aside>
+  <main>
+    <div class="card" id="card">
+      <div class="empty" id="empty">Pick a cell on the left to start.</div>
+      <div id="review" style="display:none">
+        <div class="top">
+          <div><span class="title" id="evtitle"></span><span class="tier" id="tier"></span><span class="done" id="done"></span></div>
+          <div class="msg" id="where"></div>
+        </div>
+        <canvas id="plot"></canvas>
+        <div class="opts">
+          <label><input type="checkbox" id="smooth"> Smoother view (1 kHz filter)</label>
+          <label><input type="checkbox" id="zoom"> Zoom in on the event</label>
+          <label><input type="checkbox" id="fixed"> Same Y scale for every event</label>
+          <label><input type="checkbox" id="skipdone" checked> Skip events I already answered</label>
+        </div>
+        <div class="btns">
+          <button class="b-yes" id="byes">Yes, real event<kbd>Y</kbd></button>
+          <button class="b-no" id="bno">No, not an event<kbd>N</kbd></button>
+          <button class="b-unsure" id="bunsure">Not sure<kbd>U</kbd></button>
+          <button class="b-nav" id="bback">◀ Back<kbd>←</kbd></button>
+          <button class="b-nav" id="bnext">Next ▶<kbd>→</kbd></button>
+        </div>
+        <div class="prog"><span id="progtxt"></span><div class="bar"><i id="progbar"></i></div></div>
+        <div class="save">
+          <button id="savecell">Download results for this cell</button>
+          <button id="saveall">Download results for ALL cells</button>
+          <span class="msg" id="savemsg"></span>
+        </div>
+      </div>
+      <ul class="help">
+        <li>The event the computer found sits on the <b>dashed line</b>. Inward events point <b>down</b>.</li>
+        <li><b style="color:var(--yes)">Detected</b> = the computer thinks it is an event. <b style="color:var(--maybe)">Maybe</b> = the computer is unsure. Judge both the same way.</li>
+        <li>A real event: fast drop, then a slower smooth return to baseline. A single sharp spike or a wobble the size of the noise is <b>not</b> an event.</li>
+        <li>When you finish (or stop for the day), press <b>Download results for ALL cells</b> and send the CSV file back.</li>
+      </ul>
+    </div>
+  </main>
+</div>
+
+<script src="data/cells.js"></script>
+<script>
+(function () {
+  "use strict";
+  const KEY = "hfa_sepsc_review_v1_";
+  const $ = id => document.getElementById(id);
+  const cells = window.CELLS || [];
+  const SN = window.SNIP;
+  let cur = null, data = null, pos = 0, snips = null;
+
+  // ---------- storage ----------
+  function load(id) { try { return JSON.parse(localStorage.getItem(KEY + id)) || { d: {}, pos: 0 }; } catch (e) { return { d: {}, pos: 0 }; } }
+  function save(id, st) { try { localStorage.setItem(KEY + id, JSON.stringify(st)); } catch (e) {} }
+  let st = null;
+
+  // ---------- cell list ----------
+  function renderList() {
+    const box = $("cells"); box.innerHTML = "";
+    cells.forEach(c => {
+      const s = load(c.id), n = Object.keys(s.d).length;
+      const b = document.createElement("button");
+      b.className = "cell" + (cur && cur.id === c.id ? " active" : "");
+      const pct = c.n ? Math.round(100 * n / c.n) : 100;
+      b.innerHTML = `<b>Cell ${c.id} · ${c.label}</b><small>${c.n ? `${n} of ${c.n} answered` : "nothing to review"}</small>` +
+                    `<div class="bar"><i style="width:${pct}%"></i></div>`;
+      b.onclick = () => openCell(c);
+      box.appendChild(b);
+    });
+  }
+
+  function loadScript(src) {
+    return new Promise((res, rej) => { const s = document.createElement("script"); s.src = src; s.onload = res; s.onerror = rej; document.body.appendChild(s); });
+  }
+  async function getCell(id) {
+    window.CELLDATA = window.CELLDATA || {};
+    if (!window.CELLDATA[id]) await loadScript(`data/cell${id}.js`);
+    const c = window.CELLDATA[id];
+    if (!c._snips) {
+      const bin = atob(c.b64), u8 = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+      c._snips = new Int16Array(u8.buffer);
+      c.b64 = null;
+    }
+    return c;
+  }
+
+  async function openCell(c) {
+    cur = c; data = await getCell(c.id); snips = data._snips; st = load(c.id);
+    $("empty").style.display = "none"; $("review").style.display = "";
+    renderList();
+    if (!data.events.length) { $("evtitle").textContent = `Cell ${c.id}: no events to review`; $("tier").style.display = "none"; $("done").style.display = "none";
+      $("where").textContent = ""; clearPlot(); updateProg(); setBtns(false); return; }
+    setBtns(true);
+    pos = Math.min(st.pos || 0, data.events.length - 1);
+    if ($("skipdone").checked && st.d[pos] !== undefined) { const nx = nextUndecided(pos); if (nx !== null) pos = nx; }
+    show();
+  }
+
+  // ---------- plot ----------
+  function lowpass(x, fc, fs) {               // 2nd-order Butterworth, forward + backward (zero phase)
+    const K = Math.tan(Math.PI * fc / fs), r2 = Math.SQRT2, nrm = 1 / (1 + r2 * K + K * K);
+    const b0 = K * K * nrm, b1 = 2 * b0, b2 = b0, a1 = 2 * (K * K - 1) * nrm, a2 = (1 - r2 * K + K * K) * nrm;
+    const run = (v) => { const y = new Float64Array(v.length); let x1 = v[0], x2 = v[0], y1 = v[0], y2 = v[0];
+      for (let i = 0; i < v.length; i++) { const yi = b0 * v[i] + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2; x2 = x1; x1 = v[i]; y2 = y1; y1 = yi; y[i] = yi; } return y; };
+    return run(run(x).reverse()).reverse();
+  }
+  function clearPlot() { const cv = $("plot"), g = cv.getContext("2d"); g.clearRect(0, 0, cv.width, cv.height); }
+  function draw() {
+    const cv = $("plot"), dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+    cv.width = W * dpr; cv.height = H * dpr; const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+    const L = Math.round((SN.pre + SN.post) * SN.fs / 1000), off = pos * L;
+    let y = new Float64Array(L); for (let i = 0; i < L; i++) y[i] = snips[off + i] / SN.scale;
+    if ($("smooth").checked) y = lowpass(y, 1000, SN.fs);
+    const zoom = $("zoom").checked, t0 = zoom ? -25 : -SN.pre, t1 = zoom ? 75 : SN.post;
+    const i0 = Math.round((t0 + SN.pre) * SN.fs / 1000), i1 = Math.round((t1 + SN.pre) * SN.fs / 1000);
+    let lo = Infinity, hi = -Infinity; for (let i = i0; i < i1; i++) { lo = Math.min(lo, y[i]); hi = Math.max(hi, y[i]); }
+    if ($("fixed").checked) { lo = -45; hi = 15; }
+    else { const span = Math.max(30, hi - lo), mid = (hi + lo) / 2; lo = mid - span * 0.6; hi = mid + span * 0.6; }
+    const pl = 20, pr = 20, pt = 18, pb = 34, X = t => pl + (t - t0) / (t1 - t0) * (W - pl - pr), Y = v => pt + (hi - v) / (hi - lo) * (H - pt - pb);
+    // event marker
+    g.strokeStyle = data.events[pos][3] === "detected" ? "#1f9d55" : "#e08a00"; g.setLineDash([6, 5]); g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(X(0), pt); g.lineTo(X(0), H - pb); g.stroke(); g.setLineDash([]);
+    // trace
+    g.strokeStyle = "#1d2330"; g.lineWidth = 1.2; g.beginPath();
+    for (let i = i0; i < i1; i++) { const t = i / SN.fs * 1000 - SN.pre, px = X(t), py = Y(y[i]); i === i0 ? g.moveTo(px, py) : g.lineTo(px, py); }
+    g.stroke();
+    // scale bars
+    const sbT = zoom ? 10 : 20, sbV = (hi - lo) > 60 ? 20 : 10, bx = W - pr - 10, by = H - pb + 4;
+    g.strokeStyle = "#6b7280"; g.lineWidth = 2; g.beginPath(); g.moveTo(bx - (X(sbT) - X(0)), by); g.lineTo(bx, by); g.lineTo(bx, by - (Y(0) - Y(sbV))); g.stroke();
+    g.fillStyle = "#6b7280"; g.font = "12px -apple-system, Segoe UI, sans-serif"; g.textAlign = "right";
+    g.fillText(`${sbT} ms`, bx - (X(sbT) - X(0)) - 6, by + 4); g.fillText(`${sbV} pA`, bx - 6, by - (Y(0) - Y(sbV)) / 2 + 4);
+  }
+
+  // ---------- review ----------
+  function nextUndecided(from) { for (let i = from + 1; i < data.events.length; i++) if (st.d[i] === undefined) return i;
+                                 for (let i = 0; i <= from; i++) if (st.d[i] === undefined) return i; return null; }
+  function show() {
+    const e = data.events[pos], d = st.d[pos];
+    $("evtitle").textContent = `Cell ${cur.id} · event ${pos + 1} of ${data.events.length}`;
+    const t = $("tier"); t.style.display = ""; t.className = "tier " + e[3]; t.textContent = e[3] === "detected" ? "computer: detected" : "computer: maybe";
+    const dn = $("done"); dn.style.display = d ? "" : "none";
+    if (d) { const m = { Y: ["your answer: yes", "#1f9d55"], N: ["your answer: no", "#d64545"], U: ["your answer: not sure", "#7c5cc4"] }[d]; dn.textContent = m[0]; dn.style.color = m[1]; dn.style.borderColor = m[1]; }
+    $("where").textContent = `${cur.recording}${data.events.length && cur.n > 1 ? "" : ""} · sweep ${e[0]} · ${(e[1] / 1000).toFixed(3)} s` + (cur.note ? ` · ${cur.note}` : "");
+    st.pos = pos; save(cur.id, st); draw(); updateProg();
+  }
+  function updateProg() {
+    const n = data ? data.events.length : 0, k = st ? Object.keys(st.d).length : 0;
+    $("progtxt").textContent = n ? (k >= n ? `All ${n} events answered for this cell. Download the results, then pick the next cell.` : `${k} of ${n} answered for this cell`) : "";
+    $("progbar").style.width = n ? `${Math.round(100 * k / n)}%` : "0";
+  }
+  function decide(v) {
+    if (!data || !data.events.length) return;
+    st.d[pos] = v; save(cur.id, st);
+    let nx = $("skipdone").checked ? nextUndecided(pos) : (pos + 1 < data.events.length ? pos + 1 : null);
+    if (nx === null) { show(); renderList(); return; }
+    pos = nx; show(); renderList();
+  }
+  function step(k) { if (!data || !data.events.length) return; pos = Math.max(0, Math.min(data.events.length - 1, pos + k)); show(); }
+  function setBtns(on) { ["byes", "bno", "bunsure", "bback", "bnext", "savecell"].forEach(i => $(i).disabled = !on); }
+
+  // ---------- export ----------
+  function rowsFor(c, cd, s) {
+    const name = { Y: "yes", N: "no", U: "unsure" };
+    return cd.events.map((e, i) => [c.id, `"${c.label}"`, c.recording, e[0], e[1], (e[1] / 1000).toFixed(4), e[2], e[3], s.d[i] ? name[s.d[i]] : ""].join(","));
+  }
+  const HEAD = "cell,label,recording,sweep,time_in_sweep_ms,time_s,model_score,model_tier,decision";
+  function download(name, text) {
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], { type: "text/csv" })); a.download = name;
+    document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+  const stamp = () => new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "");
+  $("savecell").onclick = () => { download(`review_cell${cur.id}_${stamp()}.csv`, HEAD + "\n" + rowsFor(cur, data, st).join("\n") + "\n");
+                                  $("savemsg").textContent = "Saved to your Downloads folder."; };
+  $("saveall").onclick = async () => {
+    $("savemsg").textContent = "Collecting all cells…"; let out = [HEAD];
+    for (const c of cells) { const cd = await getCell(c.id); out = out.concat(rowsFor(c, cd, load(c.id))); }
+    download(`review_ALL_cells_${stamp()}.csv`, out.join("\n") + "\n"); $("savemsg").textContent = "Saved to your Downloads folder. Send this file back.";
+  };
+
+  // ---------- wiring ----------
+  $("byes").onclick = () => decide("Y"); $("bno").onclick = () => decide("N"); $("bunsure").onclick = () => decide("U");
+  $("bback").onclick = () => step(-1); $("bnext").onclick = () => step(1);
+  ["smooth", "zoom", "fixed"].forEach(i => $(i).onchange = () => { if (data && data.events.length) draw(); });
+  document.addEventListener("keydown", ev => {
+    if (!data || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    const k = ev.key.toLowerCase();
+    if (k === "y" || k === "enter") { decide("Y"); ev.preventDefault(); }
+    else if (k === "n") { decide("N"); ev.preventDefault(); }
+    else if (k === "u") { decide("U"); ev.preventDefault(); }
+    else if (ev.key === "ArrowLeft") { step(-1); ev.preventDefault(); }
+    else if (ev.key === "ArrowRight") { step(1); ev.preventDefault(); }
+  });
+  window.addEventListener("resize", () => { if (data && data.events.length) draw(); });
+  renderList();
+  const m = location.hash.match(/cell=(\d\d)/);              // e.g. START_HERE.html#cell=05 opens that cell directly
+  if (m) { const c = cells.find(x => x.id === m[1]); if (c) openCell(c); }
+})();
+</script>
+</body>
+</html>
