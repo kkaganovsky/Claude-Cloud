@@ -82,6 +82,37 @@ class ReviewState:
         return c
 
 
+REQUIRED_COLS = ("sweep", "time_in_sweep_ms", "score", "accepted")
+
+
+def find_associated(rec_path):
+    """Candidate / review CSVs that belong to this recording, newest first.
+
+    Looked for next to the recording and in a `candidates/` (or `review/`) subfolder:
+    `<name>.candidates.csv` (ephys-suite-classify output), `<name>_review.csv` (Save review), `<name>.review.csv`.
+    A file only counts if its header has the candidate columns. Which one is 'right' is not decided here: the newest is listed first.
+    """
+    base = os.path.splitext(os.path.basename(rec_path))[0]
+    folder = os.path.dirname(os.path.abspath(rec_path))
+    names = (f"{base}.candidates.csv", f"{base}_review.csv", f"{base}.review.csv")
+    found = []
+    for d in (folder, os.path.join(folder, "candidates"), os.path.join(folder, "review")):
+        for n in names:
+            f = os.path.join(d, n)
+            if os.path.isfile(f) and _has_columns(f):
+                found.append(f)
+    return sorted(found, key=os.path.getmtime, reverse=True)
+
+
+def _has_columns(path):
+    try:
+        with open(path, newline="") as fh:
+            head = next(csv.reader(fh), [])
+        return all(c in head for c in REQUIRED_COLS)
+    except (OSError, UnicodeDecodeError, csv.Error):
+        return False
+
+
 def load_candidates(path, session, thr=None):
     """Read the CSV, snap every candidate to the real peak in the loaded trace, drop duplicates (keep the higher score)."""
     rows = list(csv.DictReader(open(path, newline="")))

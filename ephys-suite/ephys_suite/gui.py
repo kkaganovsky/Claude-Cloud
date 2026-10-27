@@ -900,6 +900,39 @@ class EventsTab(QtWidgets.QWidget):
         self._new_session()
         self._apply_saved_view()
 
+    def offer_associated(self):
+        """After a recording is opened: if a candidates / review file for it sits beside it, offer to load it (never silently)."""
+        rec = self.main.rec
+        if rec is None or str(self.settings.value("offer_associated", True)).lower() in ("false", "0") or self.review is not None:
+            return None
+        found = MR.find_associated(rec.path)
+        if not found:
+            return None
+        import datetime
+        best = found[0]
+        when = datetime.datetime.fromtimestamp(os.path.getmtime(best)).strftime("%Y-%m-%d %H:%M")
+        extra = f"\n\n({len(found) - 1} other matching file(s) were found; use Load model candidates to pick another.)" if len(found) > 1 else ""
+        box = QtWidgets.QMessageBox(QtWidgets.QMessageBox.Question, "Events file found",
+                                    f"Found an events file for this recording:\n\n{os.path.basename(best)}\n"
+                                    f"in {os.path.dirname(best)}\nmodified {when}\n\nLoad it for review?{extra}",
+                                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, self)
+        box.setDefaultButton(QtWidgets.QMessageBox.Yes)
+        never = QtWidgets.QCheckBox("Don't ask again (Load model candidates still works)")
+        box.setCheckBox(never)
+        box.setAttribute(Qt.WA_DeleteOnClose)
+        box.setWindowModality(Qt.WindowModal)
+
+        def done(button):
+            if never.isChecked():
+                self.settings.setValue("offer_associated", False)
+            if box.standardButton(button) == QtWidgets.QMessageBox.Yes:
+                self.load_candidates_file(best)
+        box.buttonClicked.connect(done)
+        box.open()                                       # non-blocking
+        self._assoc_box = box
+        self._assoc_path = best
+        return best
+
     def _new_session(self):
         rec = self.main.rec
         if rec is None or self._busy:
@@ -1742,6 +1775,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.spikes.set_recording(rec)
         self.statusBar().showMessage(f"{path}: {rec.n_sweeps} sweeps, channels {[f'{n} ({u})' for n, u in zip(rec.names, rec.units)]}")
         self.notify_current_source(rec)
+        self.events.offer_associated()
 
     CURRENT_NOTICES = {
         "header": ("Current channel not found",

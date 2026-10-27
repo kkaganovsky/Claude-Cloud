@@ -148,3 +148,46 @@ def test_file_dialogs_start_in_the_recordings_folder(setup, monkeypatch, tmp_pat
     assert seen["Save review"] == os.path.join(folder, "synthetic_review.csv")
     assert seen["Export events"] == os.path.join(folder, "synthetic_events.csv")
     assert seen["Model candidates"] == folder
+
+
+def _cands_csv(path, rows=((1, 1200.0, 0.9, 1), (1, 2500.0, 0.4, 0))):
+    with open(path, "w", newline="") as fh:
+        wr = csv.writer(fh)
+        wr.writerow(["sweep", "time_in_sweep_ms", "score", "accepted"])
+        wr.writerows(rows)
+
+
+def test_find_associated_files(tmp_path):
+    rec = tmp_path / "cell.abf"
+    rec.write_bytes(b"x")
+    assert MR.find_associated(str(rec)) == []
+    _cands_csv(tmp_path / "cell.candidates.csv")
+    (tmp_path / "other.candidates.csv").write_text("sweep,time_in_sweep_ms,score,accepted\n")      # another recording's file
+    (tmp_path / "cell_review.csv").write_text("not,a,candidates,file\n")                           # wrong header: ignored
+    assert MR.find_associated(str(rec)) == [str(tmp_path / "cell.candidates.csv")]
+    (tmp_path / "candidates").mkdir()
+    _cands_csv(tmp_path / "candidates" / "cell.candidates.csv")
+    os.utime(tmp_path / "cell.candidates.csv", (1, 1))                                             # older
+    assert MR.find_associated(str(rec))[0] == str(tmp_path / "candidates" / "cell.candidates.csv")   # newest first
+
+
+def test_opening_a_recording_offers_its_events_file(app, cell7_dir, tmp_path):
+    import shutil
+    d = tmp_path / "data"
+    d.mkdir()
+    shutil.copy(os.path.join(cell7_dir, "sEPSC.abf"), d / "sEPSC.abf")
+    w = MainWindow()
+    w.events.settings.clear()
+    w.load(str(d / "sEPSC.abf"))
+    assert w.events._assoc_box is None if hasattr(w.events, "_assoc_box") else True      # nothing beside it: no question
+    _cands_csv(d / "sEPSC.candidates.csv")
+    w.load(str(d / "sEPSC.abf"))
+    box = w.events._assoc_box
+    assert box is not None and "sEPSC.candidates.csv" in box.text() and w.events.review is None   # asked, did not load by itself
+    box.button(QtWidgets.QMessageBox.Yes).click()
+    assert w.events.review is not None and w.events.review.source == "sEPSC.candidates.csv"
+    w.events.settings.setValue("offer_associated", False)                                         # "don't ask again"
+    w.events._assoc_box = None
+    w.load(str(d / "sEPSC.abf"))
+    assert w.events._assoc_box is None
+    w.close()

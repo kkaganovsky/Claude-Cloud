@@ -166,6 +166,11 @@ licensing is acceptable for your use before redistributing.
 ## Reviewing classifier-proposed events
 The Events tab can load a candidates CSV from the sEPSC classifier (columns `sweep, time_in_sweep_ms, score, accepted`): accepted candidates become the event set, borderline ones are orange rings you click to accept, **R** steps through the most uncertain candidates, **M** marks a record fully reviewed, and *Save review…* writes the final decisions for retraining (see `model_review.py`).
 
+## Associated events file
+Opening a recording looks beside it (and in a `candidates/` or `review/` subfolder) for `<name>.candidates.csv`, `<name>_review.csv` or
+`<name>.review.csv` with the candidate columns, and **asks** whether to load the newest one (never loads silently; a saved
+`.review_progress.json` is then offered for resume as usual). Tick *Don't ask again* in the question to switch it off.
+
 ## Clicking markers (fixed)
 Clicks on the trace markers (orange rings, events, possible misses) were swallowed by the marker layer, so **clicking an orange ring did nothing**
 in the real window (the tests called the handler directly and missed it). Fixed and covered by tests that send real mouse clicks.
