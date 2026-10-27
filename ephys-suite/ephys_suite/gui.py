@@ -1420,7 +1420,7 @@ class EventsTab(QtWidgets.QWidget):
         if self.session is None:
             self.say("Open a recording first.", "warn")
             return
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Model candidates", "", "CSV (*.csv)")
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Model candidates", self._rec_dir(), "CSV (*.csv)")
         if path:
             self.load_candidates_file(path)
 
@@ -1482,12 +1482,20 @@ class EventsTab(QtWidgets.QWidget):
         self._review_label()
         self.say(f"Record {self.rec_i} {'marked' if self.rec_i in self.review.reviewed else 'unmarked'} as fully reviewed.")
 
+    def _rec_dir(self):
+        """Folder of the open recording: dialogs start here so outputs land next to the data."""
+        rec = self.main.rec
+        return os.path.dirname(os.path.abspath(rec.path)) if rec is not None and getattr(rec, "path", None) else ""
+
+    def _rec_path(self, name):
+        return os.path.join(self._rec_dir(), name) if self._rec_dir() else name
+
     def save_review(self):
         if self.review is None or self.session is None:
             self.say("Nothing to save: load model candidates first.", "warn")
             return
         base = os.path.splitext(os.path.basename(self.main.rec.path))[0]
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save review", f"{base}_review.csv", "CSV (*.csv)")
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save review", self._rec_path(f"{base}_review.csv"), "CSV (*.csv)")
         if path:
             kit = getattr(self, "kit", None)
             n, ch = MR.export_review(path, self.session, self.review, os.path.basename(self.main.rec.path), self.main.rec.path,
@@ -1497,7 +1505,7 @@ class EventsTab(QtWidgets.QWidget):
     def export_csv(self):
         if not self.session or not self.session.events:
             return
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export events", "events.csv", "CSV (*.csv)")
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export events", self._rec_path(os.path.splitext(os.path.basename(self.main.rec.path))[0] + "_events.csv"), "CSV (*.csv)")
         if path:
             with open(path, "w", newline="") as fh:
                 w = csv.writer(fh)

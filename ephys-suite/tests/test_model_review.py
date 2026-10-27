@@ -128,3 +128,23 @@ def test_gui_shadow_setting_is_applied_on_load(setup):
     n10 = len(ev.review.queue)
     ev.sp_shadow.setValue(0.0)
     assert len(ev.review.queue) >= n10 and ev.review.shadow_ms == 0.0
+
+
+def test_file_dialogs_start_in_the_recordings_folder(setup, monkeypatch, tmp_path):
+    w, ev, path, *_ = setup
+    ev.main.rec.path = str(tmp_path / "sub" / "synthetic.abf")
+    seen = {}
+
+    def fake_save(parent, title, start, filt):
+        seen[title] = start
+        return "", ""
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", staticmethod(fake_save))
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getOpenFileName", staticmethod(lambda p, t, start, f: seen.setdefault(t, start) and ("", "")))
+    ev.load_candidates_file(path)
+    ev.save_review()
+    ev.export_csv()
+    ev.load_model_candidates()
+    folder = str(tmp_path / "sub")
+    assert seen["Save review"] == os.path.join(folder, "synthetic_review.csv")
+    assert seen["Export events"] == os.path.join(folder, "synthetic_events.csv")
+    assert seen["Model candidates"] == folder
