@@ -100,7 +100,7 @@ Open `sEPSC.abf`, tab **Events**.
 1. Left: detection settings. Defaults: inward events, deconvolution method (Pernia-Andrade), template rise 0.5 ms / decay 5 ms, SD cutoff 3.5, lower
    threshold = RMS x 2, amplitude threshold 5 pA. Fill *Omit time period in every record* with `0` to `400` ms to skip the test
    pulse at the start of each sweep, then press **Run event detection**. Result: 160 events at 4.000 Hz.
-2. Move with **page / event** buttons, set the view with *X start*, *width*, *Y min / Y max*; **Lock Y** keeps the vertical range between
+2. Move with **page / event** buttons (keys: **X** or PageDown = next window, **Z** or PageUp = previous, arrows = next / previous event), set the view with *X start*, *width*, *Y min / Y max*; **Lock Y** keeps the vertical range between
    records, **Fit Y** rescales, **Remember view** stores it.
 3. **Add events (A)**: toggle on, click a trace position; the peak is snapped (+/- 2 ms) and kinetics are measured. If **Fit kinetics
    (K)** is off, the event is added without fitting. **Manual baseline (B)**: toggle on, click an event, then click where the baseline is;
@@ -154,12 +154,21 @@ In the Events tab, in the left panel's *Review model events* group press **Load 
 For real model output, run `ephys-suite-classify cell.abf --model <bundle>.pkl --out candidates/` and load the resulting CSV the
 same way. Untested caveat: that command has not been run with real weights.
 
+## Fitting the window to your screen
+
+The window opens at up to 94 % of your screen and remembers its size, the splitter positions and which panels you hid. Toolbars wrap
+onto a second row instead of being cut off; below 1000 x 620 px the page scrolls. **View** menu: tick or untick any panel per tab
+(settings column, small plots, table, verify card, overview strip...), pick a preset such as *Events: verify focus*, or
+*Reset layout*. On screens shorter than 860 px the two small Events plots start hidden so the trace has room.
+
 ## Key cheat sheet
 
 | Key | Action |
 |---|---|
 | A / B / K | toggle add events / manual baseline / fit kinetics |
 | Del, Ctrl+Z, Ctrl+Y | delete selected, undo, redo |
+| X or PageDown / Z or PageUp | next / previous window |
+| F1 | list of all shortcuts (Help menu) |
 | Y or Enter / N | confirm (or add) / reject (or dismiss) |
 | . / , | next / previous item |
 | E | next event to verify |

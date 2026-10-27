@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 MIN_SHOW = 0.25          # candidates below this score are neither shown nor queued
+SHADOW_MS = 10.0         # a not-accepted candidate this soon after an accepted event is not offered as borderline
 QUEUE_MAX = 600
 
 
@@ -33,19 +34,44 @@ def _logit(p):
 
 
 class ReviewState:
-    def __init__(self, cands, thr, source=""):
+    def __init__(self, cands, thr, source="", ts_ms=None, shadow_ms=SHADOW_MS):
         self.cands = cands
         self.thr = float(thr)
         self.source = source
+        self.ts_ms = ts_ms                    # ms per sample (needed to turn shadow_ms into samples)
+        self.shadow_ms = float(shadow_ms)
         self.reviewed = set()                 # sweeps (0-based) marked fully reviewed
         self.visited = set()                  # (record, peak_idx) of queue items stepped over
         self.pos = -1
-        shown = [c for c in cands if c.score >= MIN_SHOW]
+        self._rebuild()
+
+    def set_shadow(self, ms):
+        """Change the 'too soon after an accepted event' window (0 = off) and rebuild the borderline queue."""
+        self.shadow_ms = max(0.0, float(ms))
+        self._rebuild()
+
+    def _rebuild(self):
+        self.shadowed = set()                 # (record, peak_idx) of not-accepted candidates within shadow_ms AFTER an accepted one
+        if self.ts_ms and self.shadow_ms > 0:
+            win = self.shadow_ms / self.ts_ms
+            acc = {}
+            for c in self.cands:
+                if c.accepted:
+                    acc.setdefault(c.record, []).append(c.peak_idx)
+            for c in self.cands:
+                if not c.accepted and any(0 < c.peak_idx - a <= win for a in acc.get(c.record, ())):
+                    self.shadowed.add((c.record, c.peak_idx))
+        shown = [c for c in self.cands if c.score >= MIN_SHOW and (c.record, c.peak_idx) not in self.shadowed]
         shown.sort(key=lambda c: abs(_logit(c.score) - _logit(self.thr)))
         self.queue = shown[:QUEUE_MAX]
+        self.pos = -1
+
+    def is_shadowed(self, record, peak_idx):
+        return (record, peak_idx) in self.shadowed
 
     def candidates_in(self, record, accepted):
-        return [c for c in self.cands if c.record == record and c.accepted == accepted and c.score >= MIN_SHOW]
+        return [c for c in self.cands if c.record == record and c.accepted == accepted and c.score >= MIN_SHOW
+                and (accepted or (c.record, c.peak_idx) not in self.shadowed)]
 
     def step(self, d):
         if not self.queue:
@@ -78,7 +104,7 @@ def load_candidates(path, session, thr=None):
     if thr is None:
         acc = [c.score for c in cands if c.accepted]
         thr = min(acc) if acc else 0.5
-    return ReviewState(cands, thr, os.path.basename(path))
+    return ReviewState(cands, thr, os.path.basename(path), ts_ms=float(session.ts))
 
 
 def export_review(path, session, state, recording="", recording_path="", coverage=None, suspects=None):

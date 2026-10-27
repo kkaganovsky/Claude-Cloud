@@ -166,7 +166,15 @@ licensing is acceptable for your use before redistributing.
 ## Reviewing classifier-proposed events
 The Events tab can load a candidates CSV from the sEPSC classifier (columns `sweep, time_in_sweep_ms, score, accepted`): accepted candidates become the event set, borderline ones are orange rings you click to accept, **R** steps through the most uncertain candidates, **M** marks a record fully reviewed, and *Save review…* writes the final decisions for retraining (see `model_review.py`).
 
+## Window layout and keys
+The window opens at up to 94 % of the screen and remembers its size, splitter positions and hidden panels; toolbars wrap instead of
+being cut off and the page scrolls below 1000 x 620 px. **View** menu: show / hide any panel per tab, presets, *Reset layout*.
+**Help > Keyboard shortcuts (F1)** lists every key. Paging in the Events tab: **X / PageDown** next, **Z / PageUp** previous
+(PageUp / PageDown did not work before: Qt needs the name `PgDown`). **Space no longer deletes** the selected event (Delete / Backspace do).
+
 ## Verifying events and finding missed ones (Events tab)
+
+*Skip borderline within N ms* (Review model events, default 10 ms): a not-accepted candidate this soon *after* an accepted, confirmed or added event is not offered as borderline (it is usually on the previous event's decay). Whether the model scored it low *because* of the overlap is not established; set 0 to see everything. Filtered candidates stay in the exported file.
 
 A **Verify card** (right of the trace) and an **overview strip** (under it) turn review into a short loop. Everything uses the same
 event set, table and Ctrl+Z as before.

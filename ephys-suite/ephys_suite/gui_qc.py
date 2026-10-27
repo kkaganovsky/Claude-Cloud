@@ -7,7 +7,8 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
 from . import qc
-from .gui import fill, plot, table
+from . import layout as LY
+from .gui import fill, plot, register_panels, table
 
 STATUS_COLORS = {"PASS": (198, 239, 206), "WARN": (255, 235, 156), "FAIL": (255, 199, 206), "NO PULSE": (217, 217, 217),
                  "ERROR": (255, 199, 206)}
@@ -26,29 +27,23 @@ class QCTab(QtWidgets.QWidget):
         self._rows = []
         v = QtWidgets.QVBoxLayout(self)
         # ---- controls
-        top = QtWidgets.QHBoxLayout()
         b = QtWidgets.QPushButton("Choose folder…")
         b.clicked.connect(self.choose_folder)
         self.lbl_root = QtWidgets.QLabel("no folder chosen")
         self.lbl_root.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        top.addWidget(b)
-        top.addWidget(self.lbl_root, 1)
         self.sp_limit = self._spin(25.0, 1, 1000, " MΩ", "Ra must be below this (every sweep)")
         self.sp_v = self._spin(-10.0, -200, 200, " mV", "Test-pulse step, used ONLY when the file has no command-voltage channel "
                                                       "(the sign comes from the data)")
         self.sp_drift = self._spin(20.0, 1, 200, " %", "Drift flag: any sweep's Ra this far from the first sweep's (your RaExclude rule)")
-        for lbl, w in (("Ra limit", self.sp_limit), ("assumed step", self.sp_v), ("drift", self.sp_drift)):
-            top.addWidget(QtWidgets.QLabel(lbl))
-            top.addWidget(w)
         self.btn_scan = QtWidgets.QPushButton("Scan")
+        self.btn_scan.setProperty("role", "primary")
         self.btn_scan.clicked.connect(self.scan)
         self.btn_exp = QtWidgets.QPushButton("Export…")
         self.btn_exp.clicked.connect(self.export)
         self.chk_bad = QtWidgets.QCheckBox("only problems")
         self.chk_bad.toggled.connect(self._fill)
-        for w in (self.btn_scan, self.btn_exp, self.chk_bad):
-            top.addWidget(w)
-        v.addLayout(top)
+        v.addWidget(LY.flow_row(b, self.lbl_root, LY.labeled("Ra limit", self.sp_limit), LY.labeled("assumed step", self.sp_v),
+                                LY.labeled("drift", self.sp_drift), self.btn_scan, self.btn_exp, self.chk_bad))
         self.bar = QtWidgets.QProgressBar()
         self.bar.setMaximumHeight(10)
         self.bar.setTextVisible(False)
@@ -76,6 +71,8 @@ class QCTab(QtWidgets.QWidget):
         sp.addWidget(right)
         sp.setSizes([760, 760])
         v.addWidget(sp, 1)
+        register_panels(main, "qc", "Access resistance QC tab", [("table", "Cell table", self.tbl), ("pulse", "Test pulse plot", self.pp),
+                        ("ra", "Ra per sweep plot", self.pr), ("report", "Detailed report", self.txt)], [(right, [self.pp, self.pr, self.txt])])
         root = self.settings.value("root", "")
         if root and os.path.isdir(root):
             self.lbl_root.setText(root)

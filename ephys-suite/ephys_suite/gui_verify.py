@@ -231,7 +231,7 @@ class GalleryDialog(QtWidgets.QDialog):
         self.b_rest.clicked.connect(self.decide_rest)
         self.glw.scene().sigMouseClicked.connect(self._clicked)
         for key, fn in (("Return", self.decide_rest), ("Enter", self.decide_rest), ("Right", lambda: self.turn(+1)),
-                        ("Left", lambda: self.turn(-1)), ("PageDown", lambda: self.turn(+1)), ("PageUp", lambda: self.turn(-1))):
+                        ("Left", lambda: self.turn(-1)), ("PgDown", lambda: self.turn(+1)), ("PgUp", lambda: self.turn(-1))):
             QtGui.QShortcut(QtGui.QKeySequence(key), self, activated=fn)
 
     # -------------------------------------------------------------------------------------------------- data
@@ -397,7 +397,12 @@ class VerifyKit(QtCore.QObject):
         host.removeWidget(tab.pd)
         self.split = QtWidgets.QSplitter(Qt.Horizontal)
         self.split.addWidget(tab.pd)
-        self.card = self._build_card()
+        self.card_inner = self._build_card()
+        self.card = QtWidgets.QScrollArea()                 # short windows scroll the card instead of cutting off its buttons
+        self.card.setWidgetResizable(True)
+        self.card.setFrameShape(QtWidgets.QFrame.NoFrame)
+        self.card.setWidget(self.card_inner)
+        self.card.setMinimumWidth(280)
         self.split.addWidget(self.card)
         self.split.setStretchFactor(0, 4)
         self.split.setStretchFactor(1, 1)
@@ -406,8 +411,12 @@ class VerifyKit(QtCore.QObject):
         self.mm = Minimap(self)
         self.lbl_cov = QtWidgets.QLabel()
         self.lbl_cov.setTextFormat(Qt.RichText)
+        self.lbl_cov.setWordWrap(True)
         host.insertWidget(i + 1, self.mm)
         host.insertWidget(i + 2, self.lbl_cov)
+        from .gui import register_panels
+        register_panels(tab.main, "events", "Events tab", [("card", "Verify card (right of the trace)", self.card),
+                                                          ("strip", "Overview strip and coverage", [self.mm, self.lbl_cov])])
         # markers drawn on the main plot
         self.sc_sus = pg.ScatterPlotItem(size=12, symbol="d", brush=pg.mkBrush(None), pen=pg.mkPen(*PURPLE, width=2))
         self.sc_cur = pg.ScatterPlotItem(size=28, brush=pg.mkBrush(None), pen=pg.mkPen(*ORANGE, width=3, style=Qt.DashLine))
@@ -431,22 +440,12 @@ class VerifyKit(QtCore.QObject):
         self.lbl_title = QtWidgets.QLabel()
         self.lbl_title.setWordWrap(True)
         v.addWidget(self.lbl_title)
-        self.zoom = pg.PlotWidget()
-        self.zoom.showGrid(x=True, y=True, alpha=0.2)
-        self.zoom.setMinimumHeight(190)
-        self.zoom.setMenuEnabled(False)
-        for ax in ("left", "bottom"):
-            self.zoom.getAxis(ax).enableAutoSIPrefix(False)
-        v.addWidget(self.zoom, 1)
-        self.lbl_info = QtWidgets.QLabel()
-        self.lbl_info.setWordWrap(True)
-        self.lbl_info.setTextFormat(Qt.RichText)
-        v.addWidget(self.lbl_info)
+        # decisions first: they stay reachable on a short screen where the card scrolls
         row = QtWidgets.QHBoxLayout()
         self.b_yes = QtWidgets.QPushButton("✓ Confirm (Y)")
         self.b_no = QtWidgets.QPushButton("✗ Reject (N)")
-        self.b_yes.setStyleSheet("QPushButton{background:#2e9e57;color:white;font-weight:bold;padding:6px;}")
-        self.b_no.setStyleSheet("QPushButton{background:#c0392b;color:white;font-weight:bold;padding:6px;}")
+        self.b_yes.setStyleSheet("QPushButton{background:#2e9e57;color:white;font-weight:bold;padding:7px;border-radius:7px;border:none;}")
+        self.b_no.setStyleSheet("QPushButton{background:#d64545;color:white;font-weight:bold;padding:7px;border-radius:7px;border:none;}")
         self.b_yes.clicked.connect(self.confirm_current)
         self.b_no.clicked.connect(self.reject_current)
         row.addWidget(self.b_yes)
@@ -462,6 +461,17 @@ class VerifyKit(QtCore.QObject):
         b.clicked.connect(lambda: self.step(+1))
         row.addWidget(b)
         v.addLayout(row)
+        self.zoom = pg.PlotWidget()
+        self.zoom.showGrid(x=True, y=True, alpha=0.2)
+        self.zoom.setMinimumHeight(150)
+        self.zoom.setMenuEnabled(False)
+        for ax in ("left", "bottom"):
+            self.zoom.getAxis(ax).enableAutoSIPrefix(False)
+        v.addWidget(self.zoom, 1)
+        self.lbl_info = QtWidgets.QLabel()
+        self.lbl_info.setWordWrap(True)
+        self.lbl_info.setTextFormat(Qt.RichText)
+        v.addWidget(self.lbl_info)
         self.lbl_stats = QtWidgets.QLabel()
         self.lbl_stats.setWordWrap(True)
         self.lbl_stats.setTextFormat(Qt.RichText)

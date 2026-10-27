@@ -45,10 +45,13 @@ def main(argv=None):
     cell = find_cell(a.data)
     os.makedirs(a.out, exist_ok=True)
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
-    for k in ("ephys-suite", "qc", "events"):
+    from ephys_suite import style
+    style.apply(app)
+    for k in ("ephys-suite", "qc", "events", "layout"):
         QtCore.QSettings("ephys-suite", k).clear()
     w = MainWindow()
-    w.resize(1500, 920)
+    w.resize(1800, 1060)
+    w.panels.reset()                      # the offscreen screen is small, which would hide the secondary plots
     w.show()
 
     def shot(name):

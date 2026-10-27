@@ -17,6 +17,8 @@ from . import report as R
 from . import spikes as S
 from .common import idx_at, ts_ms, window_mean
 from .io import current_source, load_abf, sibling_abfs
+from . import layout as LY
+from . import style as ST
 
 pg.setConfigOptions(antialias=False, background="w", foreground="k")
 BLUE, RED, GREEN, GREY = (50, 90, 220), (220, 30, 30), (40, 160, 70), (170, 170, 170)
@@ -150,8 +152,19 @@ def scroll(widget):
     s = QtWidgets.QScrollArea()
     s.setWidgetResizable(True)
     s.setWidget(widget)
-    s.setMinimumWidth(300)
+    s.setMinimumWidth(240)
     return s
+
+
+def register_panels(main, tab, title, panels, groups=()):
+    """Offer these widgets in View > <title>. panels: (key, label, widget(s)); groups: (container, [child widgets])."""
+    pm = getattr(main, "panels", None)
+    if pm is None:
+        return
+    for key, label, ws in panels:
+        pm.add(tab, key, label, ws, title=title)
+    for c, kids in groups:
+        pm.add_group(c, kids)
 
 
 # ------------------------------------------------------------------------------------------------ Passive
@@ -197,7 +210,7 @@ class PassiveTab(QtWidgets.QWidget):
         self.lbl.setTextInteractionFlags(Qt.TextSelectableByMouse)
         sv.addWidget(self.lbl)
         sv.addStretch(1)
-        lay.addWidget(scroll(side))
+        left = scroll(side)
         right = QtWidgets.QSplitter(Qt.Vertical)
         top = QtWidgets.QSplitter()
         self.pv = plot("Vm (steps)", "ms", "mV")
@@ -208,7 +221,9 @@ class PassiveTab(QtWidgets.QWidget):
         self.tbl = table(["Sweep", "dI pA", "dV mV", "Vpeak", "Sag mV", "Sag ratio", "Tolias", "tau ms", "R²", "Status"])
         right.addWidget(self.tbl)
         right.setSizes([480, 220])
-        lay.addWidget(right, 1)
+        lay.addWidget(LY.side_split(left, right))
+        register_panels(main, "passive", "Passive tab", [("settings", "Settings column", left), ("vm", "Vm plot (steps)", self.pv),
+                        ("rin", "Input resistance plot", self.pr), ("table", "Results table", self.tbl)], [(top, [self.pv, self.pr])])
         self.region = pg.LinearRegionItem(brush=pg.mkBrush(150, 150, 150, 40), pen=pg.mkPen(GREY))
         self.region.sigRegionChangeFinished.connect(self._region)
 
@@ -329,7 +344,7 @@ class SpikesTab(QtWidgets.QWidget):
             sv.addWidget(f)
             f.changed.connect(self.recompute)
         sv.addStretch(1)
-        lay.addWidget(scroll(side))
+        left = scroll(side)
         right = QtWidgets.QSplitter(Qt.Vertical)
         r1 = QtWidgets.QWidget()
         h = QtWidgets.QHBoxLayout(r1)
@@ -395,7 +410,10 @@ class SpikesTab(QtWidgets.QWidget):
         self.tbl = table(["Sweep", "dI pA", "APs", "First AP (ms)", "Mean ISI ms", "SFA divisor", "SFA LV", "AI (ISI2/ISI1)"])
         right.addWidget(self.tbl)
         right.setSizes([260, 260, 200])
-        lay.addWidget(right, 1)
+        lay.addWidget(LY.side_split(left, right))
+        register_panels(main, "spikes", "AP tab", [("settings", "Settings column", left), ("vm", "Vm with detected APs", r1),
+                        ("ap", "First AP plot", self.pap), ("phase", "Phase plot", self.pph), ("fi", "Firing vs dI plot", self.pfi),
+                        ("table", "Per-sweep table", self.tbl)], [(r2, [self.pap, self.pph, self.pfi])])
 
     def set_recording(self, rec):
         self.spin.setRange(0, rec.n_sweeps - 1)
@@ -546,7 +564,7 @@ class EventViewBox(pg.ViewBox):
 
 class EventsTab(QtWidgets.QWidget):
     HINT_IDLE = ("Click an event marker to select it, click it again (or press Delete) to remove it.  "
-                 "<b>A</b> = add events,  <b>PageDown / PageUp</b> = next / previous window,  <b>←/→</b> = previous / next event.")
+                 "<b>A</b> = add events,  <b>X / PageDown</b> = next window, <b>Z / PageUp</b> = previous window,  <b>←/→</b> = previous / next event.")
 
     def __init__(self, main):
         super().__init__()
@@ -560,8 +578,13 @@ class EventsTab(QtWidgets.QWidget):
         self._busy = False
         self.omit_start, self.omit_stop = QtWidgets.QDoubleSpinBox(), QtWidgets.QDoubleSpinBox()
         lay = QtWidgets.QHBoxLayout(self)
-        lay.addWidget(self._build_side())
-        lay.addWidget(self._build_main(), 1)
+        self.side = self._build_side()
+        lay.addWidget(LY.side_split(self.side, self._build_main()))
+        register_panels(main, "events", "Events tab", [
+            ("settings", "Settings column", self.side), ("edit", "Edit toolbar (add / baseline / delete / undo)", self.w_edit),
+            ("hint", "Hint line", self.hint), ("view", "View controls (record, X / Y limits)", self.w_view),
+            ("measure", "Detection measure plot", self.pm), ("plots", "Aligned events and cumulative plots", self.bot),
+            ("table", "Events table", self.tbl)])
         self._shortcuts()
         self._timer = QtCore.QTimer(self)
         self._timer.setSingleShot(True)
@@ -654,6 +677,17 @@ class EventsTab(QtWidgets.QWidget):
         bm.setToolTip("Only sweeps you mark are used as trusted labels when retraining.")
         bm.clicked.connect(self.mark_sweep_reviewed)
         rl.addWidget(bm)
+        self.sp_shadow = QtWidgets.QDoubleSpinBox()
+        self.sp_shadow.setRange(0, 200)
+        self.sp_shadow.setDecimals(1)
+        self.sp_shadow.setSuffix(" ms")
+        self.sp_shadow.setValue(float(self.settings.value("shadow_ms", MR.SHADOW_MS)))
+        self.sp_shadow.setKeyboardTracking(False)
+        self.sp_shadow.setToolTip("A not-accepted candidate this soon AFTER an accepted (or confirmed / added) event is not offered as "
+                                  "borderline: it usually sits on the previous event's decay. 0 = offer everything. Those candidates stay "
+                                  "in the exported file as unreviewed.")
+        self.sp_shadow.valueChanged.connect(self._shadow_changed)
+        rl.addWidget(LY.labeled("Skip borderline within", self.sp_shadow))
         self.chk_cands = QtWidgets.QCheckBox("Show not-accepted candidates (orange)")
         self.chk_cands.setChecked(True)
         self.chk_cands.toggled.connect(lambda *_: self._markers())
@@ -673,9 +707,6 @@ class EventsTab(QtWidgets.QWidget):
         b.setChecked(checked)
         b.setToolButtonStyle(Qt.ToolButtonTextOnly)
         b.setMinimumHeight(26)
-        b.setStyleSheet("QToolButton{padding:2px 8px;border:1px solid #b5b5b5;border-radius:3px;background:#f4f4f4;}"
-                        "QToolButton:checked{background:#2e9e57;color:white;font-weight:bold;border-color:#1f7a41;}"
-                        "QToolButton:pressed{background:#d5d5d5;}")
         return b
 
     def _build_main(self):
@@ -683,7 +714,6 @@ class EventsTab(QtWidgets.QWidget):
         v = QtWidgets.QVBoxLayout(w)
         v.setContentsMargins(0, 0, 0, 0)
         # --- edit toolbar
-        row = QtWidgets.QHBoxLayout()
         self.btn_add = self._tool("Add events (A)", "Click an event (or drag across it) to add it. The peak snaps to the extreme "
                                                     "within the snap window.")
         self.btn_fit = self._tool("Fit kinetics (K)", "ON: added events are measured fully and must pass the thresholds "
@@ -700,43 +730,32 @@ class EventsTab(QtWidgets.QWidget):
         self.snap.setValue(2.0)
         self.snap.setSuffix(" ms")
         self.snap.setToolTip("Snap window: a click finds the peak within ± this many ms")
-        for b in (self.btn_add, self.btn_fit, self.btn_bl, self.btn_del, self.btn_undo, self.btn_redo):
-            row.addWidget(b)
-        row.addWidget(QtWidgets.QLabel("snap ±"))
-        row.addWidget(self.snap)
-        row.addStretch(1)
-        v.addLayout(row)
+        self.w_edit = LY.flow_row(self.btn_add, self.btn_fit, self.btn_bl, self.btn_del, self.btn_undo, self.btn_redo,
+                                  LY.labeled("snap ±", self.snap))
+        v.addWidget(self.w_edit)
         self.hint = QtWidgets.QLabel(self.HINT_IDLE)
         self.hint.setWordWrap(True)
         self._hint_style(None)
         v.addWidget(self.hint)
         # --- view toolbar
-        vr = QtWidgets.QHBoxLayout()
         self.spin = QtWidgets.QSpinBox()
         self.spin.valueChanged.connect(self._record_changed)
-        vr.addWidget(QtWidgets.QLabel("Record"))
-        vr.addWidget(self.spin)
-        self.b_prev = self._tool("◀ page", "Previous window (PageUp / X)", checkable=False)
-        self.b_next = self._tool("page ▶", "Next window (PageDown / Z)", checkable=False)
+        self.b_prev = self._tool("◀ page", "Previous window (PageUp / Z)", checkable=False)
+        self.b_next = self._tool("page ▶", "Next window (PageDown / X)", checkable=False)
         self.b_pe = self._tool("◀ event", "Previous event (←)", checkable=False)
         self.b_ne = self._tool("event ▶", "Next event (→)", checkable=False)
-        for b in (self.b_prev, self.b_next, self.b_pe, self.b_ne):
-            vr.addWidget(b)
         self.vx, self.vw, self.vy0, self.vy1 = (self._vspin(-1e9, 1e9), self._vspin(1, 1e9), self._vspin(-1e9, 1e9), self._vspin(-1e9, 1e9))
-        for lbl, sp in (("X start ms", self.vx), ("width ms", self.vw), ("Y min", self.vy0), ("Y max", self.vy1)):
-            vr.addWidget(QtWidgets.QLabel(lbl))
-            vr.addWidget(sp)
+        for sp in (self.vx, self.vw, self.vy0, self.vy1):
             sp.valueChanged.connect(self._view_edited)
         self.chk_locky = QtWidgets.QCheckBox("Lock Y")
         self.chk_locky.setToolTip("ON: keep the Y limits above while paging / changing record.\nOFF: fit Y to the visible data each time.")
         self.chk_locky.setChecked(True)
-        vr.addWidget(self.chk_locky)
         self.b_fity = self._tool("Fit Y", "Fit Y to the visible data", checkable=False)
         self.b_save = self._tool("Remember view", "Save the current window width and Y limits; they are re-applied whenever a file is opened.", checkable=False)
-        vr.addWidget(self.b_fity)
-        vr.addWidget(self.b_save)
-        vr.addStretch(1)
-        v.addLayout(vr)
+        self.w_view = LY.flow_row(LY.labeled("Record", self.spin), self.b_prev, self.b_next, self.b_pe, self.b_ne,
+                                  LY.labeled("X start ms", self.vx), LY.labeled("width ms", self.vw),
+                                  LY.labeled("Y min", self.vy0), LY.labeled("Y max", self.vy1), self.chk_locky, self.b_fity, self.b_save)
+        v.addWidget(self.w_view)
         # --- plots
         right = QtWidgets.QSplitter(Qt.Vertical)
         top = QtWidgets.QWidget()
@@ -751,6 +770,7 @@ class EventsTab(QtWidgets.QWidget):
         self.pd.setLabel("bottom", "ms")
         self.pd.setLabel("left", "pA")
         self.pd.setFocusPolicy(Qt.StrongFocus)
+        self.pd.setMinimumHeight(260)                   # the trace never gets squeezed away by the other panels
         for ax in ("left", "bottom"):
             self.pd.getAxis(ax).enableAutoSIPrefix(False)
         self.curve = self.pd.plot([], [], pen=pg.mkPen((40, 40, 40), width=1))
@@ -776,7 +796,7 @@ class EventsTab(QtWidgets.QWidget):
         tv.addWidget(self.pd, 4)
         tv.addWidget(self.pm, 1)
         right.addWidget(top)
-        bot = QtWidgets.QSplitter()
+        bot = self.bot = QtWidgets.QSplitter()
         self.pavg = plot("Events aligned on half-rise", "ms", "pA")
         self.pcdf = plot("Cumulative probability: amplitude", "pA", "P")
         self.pint = plot("Cumulative probability: inter-event interval", "ms", "P")
@@ -823,14 +843,14 @@ class EventsTab(QtWidgets.QWidget):
         sc("A", lambda: self.btn_add.toggle())
         sc("K", lambda: self.btn_fit.toggle())
         sc("B", lambda: self.btn_bl.toggle())
-        for k in ("Delete", "Backspace", "Space"):
+        for k in ("Delete", "Backspace"):                  # Space no longer deletes: too easy to hit by accident
             sc(k, self.delete_selected)
         sc("Right", lambda: self.goto_event(+1))
         sc("Left", lambda: self.goto_event(-1))
-        sc("PageDown", lambda: self.page(+1))
-        sc("Z", lambda: self.page(+1))
-        sc("PageUp", lambda: self.page(-1))
-        sc("X", lambda: self.page(-1))
+        sc("PgDown", lambda: self.page(+1))
+        sc("X", lambda: self.page(+1))                      # Z and X sit left-to-right on the keyboard: Z back, X forward
+        sc("PgUp", lambda: self.page(-1))
+        sc("Z", lambda: self.page(-1))
         sc("Ctrl+Z", lambda: self._undo(True))
         sc("Ctrl+Y", lambda: self._undo(False))
         sc("Esc", self.cancel)
@@ -1391,6 +1411,12 @@ class EventsTab(QtWidgets.QWidget):
         if path:
             self.load_candidates_file(path)
 
+    def _shadow_changed(self, v):
+        self.settings.setValue("shadow_ms", float(v))
+        if self.review is not None:
+            self.review.set_shadow(v)
+            self._refresh_all()
+
     def load_candidates_file(self, path, thr=None):
         try:
             st = MR.load_candidates(path, self.session, thr)
@@ -1402,6 +1428,7 @@ class EventsTab(QtWidgets.QWidget):
             n = self.session.load_external([(c.record, c.peak_idx) for c in st.cands if c.accepted])
         finally:
             QtWidgets.QApplication.restoreOverrideCursor()
+        st.set_shadow(self.sp_shadow.value())
         self.review = st
         self.sel = None
         self._load_record(reset_x=False)
@@ -1494,7 +1521,7 @@ class SummaryTab(QtWidgets.QWidget):
         b2 = QtWidgets.QPushButton("Append / save row to CSV…")
         b2.clicked.connect(self.save)
         f.addRow(b2)
-        lay.addWidget(scroll(side))
+        left = scroll(side)
         right = QtWidgets.QSplitter(Qt.Vertical)
         self.tbl = table(["Column", "Value"])
         self.dec = QtWidgets.QTextEdit()
@@ -1502,7 +1529,9 @@ class SummaryTab(QtWidgets.QWidget):
         right.addWidget(self.tbl)
         right.addWidget(self.dec)
         right.setSizes([420, 380])
-        lay.addWidget(right, 1)
+        lay.addWidget(LY.side_split(left, right))
+        register_panels(main, "summary", "Cell summary tab", [("meta", "Metadata / buttons column", left), ("table", "Row table", self.tbl),
+                        ("decisions", "Decisions text", self.dec)])
 
     def pick_spont(self):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Resting-potential recording", "", "Axon ABF (*.abf)")
@@ -1542,12 +1571,14 @@ class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("ephys-suite")
-        self.resize(1600, 950)
+        self.layout_settings = QtCore.QSettings("ephys-suite", "layout")
+        self.panels = LY.PanelManager(self.layout_settings)
         self.rec = None
         self.last_notice = None
         self._notice_box = None
         self.tabs = QtWidgets.QTabWidget()
-        self.setCentralWidget(self.tabs)
+        self.tabs.setDocumentMode(True)
+        self.setCentralWidget(LY.scrolling_central(self.tabs))
         self.passive = PassiveTab(self)
         self.spikes = SpikesTab(self)
         self.events = EventsTab(self)
@@ -1557,6 +1588,11 @@ class MainWindow(QtWidgets.QMainWindow):
         for w, n in ((self.passive, "Passive (Rin / sag / tau / Cm)"), (self.spikes, "AP counting and kinetics"),
                      (self.events, "Events"), (self.summary, "Cell summary"), (self.qc, "Access resistance QC")):
             self.tabs.addTab(w, n)
+        self._small_screen_defaults()
+        LY.restore_splitters(self._tab_map(), self.layout_settings)
+        LY.fit_window(self, self.layout_settings)
+        if str(self.layout_settings.value("window/maximized", False)).lower() == "true":
+            self.setWindowState(self.windowState() | Qt.WindowMaximized)
         m = self.menuBar().addMenu("&File")
         a = m.addAction("&Open .abf…")
         a.setShortcut("Ctrl+O")
@@ -1567,6 +1603,7 @@ class MainWindow(QtWidgets.QMainWindow):
         a = m.addAction("&Next file in folder")
         a.setShortcut("Ctrl+]")
         a.triggered.connect(lambda: self.step_file(+1))
+        self._build_view_and_help_menus()
         tb = self.addToolBar("Files")
         tb.setMovable(False)
         self.act_prev = tb.addAction("\u25c0 Previous file", lambda: self.step_file(-1))
@@ -1580,6 +1617,66 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_nav()
         self.statusBar().showMessage("File > Open (Ctrl+O); then Ctrl+] / Ctrl+[ for the next / previous file in the folder")
         self._step_busy = False
+
+    def _small_screen_defaults(self):
+        """On a short screen the secondary plots start hidden (View menu brings them back) so the trace gets the room."""
+        scr = self.screen() or QtWidgets.QApplication.primaryScreen()
+        if scr.availableGeometry().height() >= 860:
+            return
+        for tab, key in (("events", "measure"), ("events", "plots")):
+            if self.layout_settings.value(f"panels/{tab}/{key}", None) is None:
+                self.panels.set_on(tab, key, False, remember=False)
+
+    def _tab_map(self):
+        return {"passive": self.passive, "spikes": self.spikes, "events": self.events, "summary": self.summary, "qc": self.qc}
+
+    VIEW_PRESETS = [("events", "Events: verify focus (hide settings, plots, table)", {"settings", "measure", "plots", "table"}),
+                    ("events", "Events: compact (hide the small plots)", {"measure", "plots"}),
+                    ("passive", "Passive: plots only", {"settings", "table"}),
+                    ("spikes", "AP: plots only", {"settings", "table"})]
+
+    SHORTCUTS = [
+        ("Whole app", [("Ctrl+O", "Open .abf"), ("Ctrl+[ / Ctrl+]", "Previous / next file in the folder"), ("F1", "This list")]),
+        ("Events: moving", [("X or PageDown", "Next window"), ("Z or PageUp", "Previous window"), ("→ / ←", "Next / previous event"),
+                            ("V", "Next stretch you have not looked at"), ("E", "Next event still to verify"),
+                            ("R / Shift+R", "Next / previous uncertain candidate")]),
+        ("Events: editing", [("A", "Add events (toggle)"), ("K", "Fit kinetics (toggle)"), ("B", "Manual baseline (toggle)"),
+                             ("Delete / Backspace", "Remove the selected event"), ("Ctrl+Z / Ctrl+Y", "Undo / redo"), ("Esc", "Cancel")]),
+        ("Events: verifying", [("Y or Enter", "Confirm (or add a possible miss)"), ("N", "Reject (or dismiss)"),
+                               (". / ,", "Skip / go back"), ("F / Shift+F", "Next / previous possible miss"), ("G", "Gallery"),
+                               ("M", "Mark this record fully reviewed")]),
+        ("AP tab", [("1 / 2", "Threshold method"), ("F", "First spiking sweep"), ("C", "Copy the AP row")]),
+    ]
+
+    def _build_view_and_help_menus(self):
+        vm = self.menuBar().addMenu("&View")
+        self.panels.populate_menu(vm, self.VIEW_PRESETS)
+        hm = self.menuBar().addMenu("&Help")
+        a = hm.addAction("&Keyboard shortcuts")
+        a.setShortcut("F1")
+        a.triggered.connect(self.show_shortcuts)
+
+    def show_shortcuts(self):
+        html = ["<h3 style='margin:0 0 6px 0'>Keyboard shortcuts</h3>"]
+        for title, rows in self.SHORTCUTS:
+            html.append(f"<p style='margin:10px 0 2px 0'><b>{title}</b></p><table cellspacing='3'>")
+            html += [f"<tr><td style='padding-right:18px'><code>{k}</code></td><td>{d}</td></tr>" for k, d in rows]
+            html.append("</table>")
+        html.append("<p style='color:#667085'>Keys are ignored while you are typing in a box.</p>")
+        box = QtWidgets.QMessageBox(self)
+        box.setWindowTitle("Keyboard shortcuts")
+        box.setTextFormat(Qt.RichText)
+        box.setText("".join(html))
+        box.setAttribute(Qt.WA_DeleteOnClose)
+        box.open()
+        self._shortcut_box = box
+
+    def closeEvent(self, ev):
+        try:
+            LY.remember_window(self, self.layout_settings)
+            LY.save_splitters(self._tab_map(), self.layout_settings)
+        finally:
+            super().closeEvent(ev)
 
     def _update_nav(self):
         files = sibling_abfs(self.path) if self.path else []
@@ -1655,6 +1752,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
 def run(path=None):
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    ST.apply(app)
     w = MainWindow()
     w.show()
     if path:

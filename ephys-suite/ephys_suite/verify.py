@@ -183,8 +183,14 @@ def build_queue(mode: str, session: E.EventSession, review: Optional[MR.ReviewSt
     elif mode == "borderline":
         if review is not None:
             thr = MR._logit(review.thr)
+            win = review.shadow_ms / session.ts if review.shadow_ms > 0 else 0
+            peaks = {}
+            for e in session.events:                     # events you confirmed or added shadow a candidate too, not only accepted ones
+                peaks.setdefault(e.record, []).append(e.peak_idx)
             for c in review.cands:
                 if c.score < MR.MIN_SHOW or session.find_event(c.record, c.peak_idx, tol) is not None:
+                    continue
+                if review.is_shadowed(c.record, c.peak_idx) or any(0 < c.peak_idx - a <= win for a in peaks.get(c.record, ())):
                     continue
                 if not include_done and session.decision(c.record, c.peak_idx) == "dismissed":
                     continue
