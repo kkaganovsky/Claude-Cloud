@@ -12,7 +12,7 @@ dependencies = ["numpy", "scipy", "pyabf", "pyqtgraph", "PySide6", "openpyxl"]
 
 [project.optional-dependencies]
 test = ["pytest", "playwright"]   # playwright is optional: the headless-Chrome test skips without it
-ml = ["torch", "scikit-learn"]
+ml = ["torch", "scikit-learn>=1.9"]   # the bundled model was pickled with scikit-learn 1.9.1
 
 [project.scripts]
 ephys-suite = "ephys_suite.__main__:main"
@@ -26,3 +26,4 @@ packages = ["ephys_suite", "ephys_suite.ml"]
 
 [tool.setuptools.package-data]
 ephys_suite = ["review_page.html"]
+"ephys_suite.ml" = ["models/*.pkl.xz", "models/*.md"]

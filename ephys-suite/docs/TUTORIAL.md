@@ -152,8 +152,8 @@ In the Events tab, in the left panel's *Review model events* group press **Load 
 - **Resume / save**: decisions and coverage autosave 1.5 s after each change to `<candidates>.review_progress.json`; *Resume saved
   review* restores them later. *Save review...* writes the CSV with extra columns `decision` and `record_viewed_pct`.
 
-For real model output, run `ephys-suite-classify cell.abf --model <bundle>.pkl --out candidates/` and load the resulting CSV the
-same way. Untested caveat: that command has not been run with real weights.
+For real model output, run `ephys-suite-classify cell.abf --out candidates/` (uses the bundled v3 model) and load the resulting CSV the
+same way.
 
 ## Fitting the window to your screen
 

@@ -1,5 +1,8 @@
 """Run a trained sEPSC classifier bundle on a recording and write a candidates CSV for the Events tab review workflow.
 
+The trained v3 bundle ships with the package (ephys_suite/ml/models/sepsc_v3.pkl.xz, see models/MODEL_CARD.md) and is used when no
+--model is given. Bundles may be plain .pkl or xz-compressed .pkl.xz.
+
 Bundle (pickle, produced by the training code that lives next to the weights): dict with
     rf            fitted sklearn classifier on the tabular features (optional)
     cnn_cfg       {"width", "drop", ...} CNN hyper-parameters
@@ -15,6 +18,7 @@ Candidates come from the matched-filter + derivative detectors on a 10 kHz, 3 kH
 30 ms or the last 120 ms of a sweep (no room for the wide window) are not scored. Test pulses are not masked here.
 """
 import csv
+import lzma
 import os
 import pickle
 
@@ -28,11 +32,14 @@ NOISY_THRESHOLD = 0.90    # stricter acceptance threshold for noisy recordings (
 MIN_KEEP = 0.25           # candidates below this score are not written (the review tool ignores them anyway)
 
 
+DEFAULT_MODEL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "sepsc_v3.pkl.xz")
 LAST = {}               # info about the last classify_recording call: noisy flag, pre-event noise SD, threshold used
 
 
-def load_bundle(path):
-    with open(path, "rb") as fh:
+def load_bundle(path=None):
+    """Load a model bundle; with no path, the bundled v3 model."""
+    path = path or DEFAULT_MODEL
+    with (lzma.open if path.endswith(".xz") else open)(path, "rb") as fh:
         return pickle.load(fh)
 
 
@@ -151,7 +158,7 @@ def main(argv=None):
     from ..io import load_abf
     ap = argparse.ArgumentParser(prog="ephys-suite-classify", description="Classify sEPSC candidates with a trained model bundle.")
     ap.add_argument("abf", nargs="+")
-    ap.add_argument("--model", required=True, help="model bundle (.pkl)")
+    ap.add_argument("--model", default=None, help="model bundle (.pkl or .pkl.xz); default: the bundled v3 model")
     ap.add_argument("--out", default=".", help="output folder for <name>.candidates.csv")
     ap.add_argument("--threshold", type=float, default=None, help="override the bundle's acceptance threshold")
     ap.add_argument("--accept-flagged", action="store_true", help="also accept events flagged large_slow (default: flagged events are not accepted)")
