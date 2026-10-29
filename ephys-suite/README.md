@@ -1,6 +1,6 @@
 # ephys-suite
 
-**New here? Follow the [tutorial](docs/TUTORIAL.md)** (worked example on one cell, with screenshots).
+**New here? Follow the [tutorial](docs/TUTORIAL.md)** (worked example on one cell, with screenshots). **Collaborator?** See the [guide for running the sEPSC analysis](docs/COLLEAGUE_GUIDE.md).
 
 Patch-clamp analysis suite modelled on [Easy Electrophysiology](https://www.easyelectrophysiology.com) (manual v2.6.3 and
 its open-source analysis code), for Axon `.abf` files. Independent re-implementation, GPL-3.0-or-later (the algorithms follow
