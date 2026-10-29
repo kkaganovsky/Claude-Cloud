@@ -83,3 +83,15 @@ def test_flagged_events_are_not_accepted_by_default(rec):
     assert set(x["flag"] for x in rows) <= {"", "large_slow", "near_large"}
     assert all(not (x["flag"] and x["accepted"]) for x in rows)
     assert "threshold" in infer.LAST
+
+
+def test_bundled_model_finds_planted_events(rec):
+    """The shipped v3 bundle loads with no path and accepts most clear synthetic EPSCs."""
+    if not os.path.exists(infer.DEFAULT_MODEL):
+        pytest.skip("bundled model not present")
+    r, times = rec
+    b = infer.load_bundle()
+    assert 0.5 < b["threshold"] < 1 and len(b["cnn_states"]) == 3
+    acc = [x["time_in_sweep_ms"] for x in infer.classify_recording(r, b) if x["accepted"]]
+    hit = sum(any(abs(a - (t + 1.5)) < 6 for a in acc) for t in times)
+    assert hit >= 0.8 * len(times), (hit, len(times))
