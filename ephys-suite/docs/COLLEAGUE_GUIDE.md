@@ -4,8 +4,8 @@ Two ways to take part. Pick one.
 
 | | **Route A: review in a browser** | **Route B: run the whole analysis yourself** |
 |---|---|---|
-| Install | nothing | Python + this repository + the model file |
-| You get from us | a folder or .zip (`START_HERE.html`) | the model file (`.pkl`) and your own recordings |
+| Install | nothing | Python + this repository (the model is included) |
+| You get from us | a folder or .zip (`START_HERE.html`) | access to this repository; you bring your own recordings |
 | You do | answer Yes / No / Not sure for each event the model proposed, send back one CSV | run the model, review its events in the app, look for missed events, export results |
 | Use it when | you are checking events someone else already detected | you have your own recordings to analyse |
 
@@ -26,27 +26,27 @@ git checkout claude/loving-euler-nqbzva          # the current work is on this b
 cd ephys-suite
 python -m venv .venv
 source .venv/bin/activate                         # Windows: .venv\Scripts\activate
-pip install -e ".[ml]"                            # the app plus torch and scikit-learn for the model
+pip install -e ".[ml]"                            # the app plus torch and scikit-learn for the model (large download)
 ```
 
 If `git clone` is refused, ask the repository owner for access (the repository may be private).
 Check the install: `ephys-suite-classify --help` should list `--model` and `--out`, and `ephys-suite` (step 6) should open a window.
 
-### 2. Get the model file
+### 2. The model is included
 
-> **TO BE FILLED IN BY THE OWNER BEFORE SENDING:** where to download the model file, its exact name
-> (the README example calls it `final_models_v2.pkl`), and its size. The model file is **not** in the GitHub repository.
-> Send it by a shared drive or institutional file transfer, not by committing it to GitHub.
->
-> Download link / location: `__________________`
-> File name: `__________________`   Checksum (optional, `shasum -a 256 file`): `__________________`
-
-Save it somewhere permanent, for example `~/ephys-models/final_models_v2.pkl`, and note the full path.
+There is nothing separate to download: the trained classifier (v3) ships inside the repository as
+`ephys_suite/ml/models/sepsc_v3.pkl.xz` (43 MB, so the clone takes a moment longer) and `ephys-suite-classify` uses it when you give no `--model`.
+Its model card, `ephys_suite/ml/models/MODEL_CARD.md`, lists what it was trained on, its held-out performance, the threshold and the checksums.
+Read it once. In short, from the card: random forest plus three CNNs, threshold 0.866 (0.90 for noisy recordings); on held-out cells precision
+about 0.90 and recall about 0.84; **known weak spot: very noisy, low-rate cells**, which should be reviewed by hand.
 
 Two cautions:
 
-- **The model file is a Python pickle.** Opening a pickle can run code. Only use a file that came directly from the owner, never one from an unknown source.
-- **Library versions matter for pickles.** If loading fails with a message about `sklearn` or `torch`, ask the owner which versions the model was saved with and install those (`pip install "scikit-learn==X.Y.Z"`). The versions are not recorded in this repository, so I cannot tell you them.
+- **The model file is a Python pickle.** Opening a pickle can run code. Use only the copy that comes with this repository, and never a `.pkl` from an unknown source.
+- **Library versions.** The card says it was saved with scikit-learn 1.9.1, torch 2.14.1 and numpy 2.4.6. A much older scikit-learn may warn or fail to load the forest.
+  If loading fails, install those versions: `pip install "scikit-learn==1.9.1"`.
+
+To use a different model file, add `--model path/to/other.pkl` (plain `.pkl` or `.pkl.xz`).
 
 ### 3. Organise your recordings
 
@@ -64,7 +64,7 @@ test-pulse recordings in a folder named `CM` (for example `line 14/cell 3/EPSC/â
 ### 4. Run the model (once per recording)
 
 ```bash
-ephys-suite-classify "my_cell/sEPSC.abf" --model ~/ephys-models/final_models_v2.pkl --out "my_cell/candidates"
+ephys-suite-classify "my_cell/sEPSC.abf" --out "my_cell/candidates"
 ```
 
 It prints how many candidates were accepted and the threshold it used, and writes `my_cell/candidates/sEPSC.candidates.csv`.
@@ -148,7 +148,7 @@ When finished:
 
 - The model's scores are only as good as its training. Check quiet cells (few small events) by eye.
 - Review is on your judgement of each event. Counts depend on how strictly each reviewer applies "real event", so agree on the rule with the owner before comparing cells.
-- This guide was written without running the real model: the model file was not available where the software was developed, so the `ephys-suite-classify` step has not been tested with real weights. Report anything that looks wrong, with the recording and the time in the sweep.
+- The guide's classify step was written without running the model: torch could not be installed in the environment where it was written. The owner's commit note says a clean install scored a real recording identically to the original bundle. Report anything that looks wrong, with the recording and the time in the sweep.
 
 ### Troubleshooting
 
@@ -156,7 +156,7 @@ When finished:
 |---|---|
 | `command not found: ephys-suite` | activate the virtual environment: `source .venv/bin/activate` |
 | `ModuleNotFoundError: torch` | you installed without the model parts: `pip install -e ".[ml]"` |
-| Error when loading the model about sklearn / torch | version mismatch, see step 2 |
+| Error when loading the model about sklearn / torch / numpy | version mismatch, see step 2 |
 | The app does not offer the events file | the CSV must be named `<recording>.candidates.csv` and sit beside the recording or in a `candidates/` or `review/` subfolder |
 | The window is too big or small for your screen | it sizes itself to your screen and remembers it; the **View** menu shows and hides panels, *Reset layout* undoes it |
 | A click on an orange ring does nothing | update to the latest commit of the branch (`git pull`); this was a bug in earlier versions |
