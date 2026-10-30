@@ -20,19 +20,45 @@ PALETTES = {
 }
 MARKERS = ["o", "s", "^", "v", "D", "P", "X", "*", "<", ">", "h", "+", "x"]
 HATCHES = ["", "//", "\\\\", "xx", "..", "++", "--", "oo"]
-_FONT_CANDIDATES = ["DejaVu Sans", "Arial", "Helvetica", "Liberation Sans", "Calibri", "Times New Roman", "Liberation Serif", "DejaVu Serif", "Courier New", "DejaVu Sans Mono"]
+_FONT_CANDIDATES = ["DejaVu Sans", "Helvetica", "Arial", "Liberation Sans", "Calibri", "Times New Roman", "Liberation Serif", "DejaVu Serif", "Courier New", "DejaVu Sans Mono"]
+
+
+def register_fonts():
+    """Make fonts in plotsuite/fonts/ (bundled Nimbus Sans) and in $PLOTSUITE_FONTS (e.g. your own licensed Helvetica .otf/.ttf) available."""
+    import os
+    import pathlib
+    from matplotlib import font_manager
+    dirs = [pathlib.Path(__file__).parent / "fonts"] + [pathlib.Path(d) for d in os.environ.get("PLOTSUITE_FONTS", "").split(os.pathsep) if d]
+    for d in dirs:
+        for f in sorted(d.glob("*")) if d.is_dir() else []:
+            if f.suffix.lower() in (".otf", ".ttf"):
+                try:
+                    font_manager.fontManager.addfont(str(f))
+                except Exception:
+                    pass
+
+
+register_fonts()
+
+# Helvetica is commercial and often missing; these are metric-compatible stand-ins (same glyph widths, so layouts don't shift).
+FONT_ALIASES = {"Helvetica": ["Helvetica", "Helvetica Neue", "Nimbus Sans", "Arial", "Liberation Sans", "Nimbus Sans L"]}
+
+
+def resolve_font(name: str) -> str | None:
+    """First installed font for `name` (or one of its aliases); None if nothing is installed."""
+    from matplotlib import font_manager
+    for f in FONT_ALIASES.get(name, [name]):
+        try:
+            font_manager.findfont(f, fallback_to_default=False)
+            return f
+        except Exception:
+            pass
+    return None
 
 
 def _installed_fonts() -> list[str]:
     """Only offer fonts that matplotlib can actually find (otherwise choosing one silently does nothing)."""
-    from matplotlib import font_manager
-    out = []
-    for f in _FONT_CANDIDATES:
-        try:
-            font_manager.findfont(f, fallback_to_default=False)
-            out.append(f)
-        except Exception:
-            pass
+    out = [f for f in _FONT_CANDIDATES if resolve_font(f)]
     return out or ["DejaVu Sans"]
 
 
@@ -52,6 +78,12 @@ class Style:
     width: float = F(3.4, "Width (inches)", "Figure", lo=1.0, hi=20.0, step=0.1)
     height: float = F(3.0, "Height (inches)", "Figure", lo=1.0, hi=20.0, step=0.1)
     dpi: int = F(300, "Export DPI", "Figure", lo=72, hi=1200, step=50)
+    auto_width: bool = F(False, "Fixed height, width set by number of bars", "Figure", help="Height = 'Height' below; the plot area is (bars x slot width) wide and the figure width follows. Gives identical bar widths and heights across graphs.")
+    bar_slot: float = F(0.2, "Width per bar slot (inches)", "Figure", lo=0.05, hi=2.0, step=0.01)
+    margin_left: float = F(0.55, "Left margin (inches)", "Figure", lo=0.0, hi=3.0, step=0.05)
+    margin_right: float = F(0.1, "Right margin (inches)", "Figure", lo=0.0, hi=3.0, step=0.05)
+    margin_bottom: float = F(0.45, "Bottom margin (inches)", "Figure", lo=0.0, hi=3.0, step=0.05)
+    margin_top: float = F(0.1, "Top margin (inches)", "Figure", lo=0.0, hi=3.0, step=0.05)
     background: str = F("white", "Background", "Figure", "select", ["white", "transparent"])
     font_family: str = F("DejaVu Sans", "Font", "Figure", "select", FONTS)
     title_size: float = F(10.0, "Title size (pt)", "Figure", lo=4.0, hi=40.0, step=0.5)
@@ -77,6 +109,8 @@ class Style:
     hide_top_right: bool = F(True, "Hide top/right axes", "Axes")
     spine_offset: float = F(0.0, "Detach axes (points)", "Axes", lo=0.0, hi=30.0, step=1.0)
     tick_dir: str = F("out", "Tick direction", "Axes", "select", ["out", "in", "inout"])
+    tick_pad: float = F(3.5, "Gap between tick and tick label (pt)", "Axes", lo=0.0, hi=15.0, step=0.5)
+    label_pad: float = F(4.0, "Gap between tick labels and axis title (pt)", "Axes", lo=0.0, hi=20.0, step=0.5)
     tick_len: float = F(3.5, "Tick length", "Axes", lo=0.0, hi=15.0, step=0.5)
     tick_width: float = F(1.0, "Tick width", "Axes", lo=0.0, hi=5.0, step=0.1)
     minor_ticks: bool = F(False, "Minor ticks", "Axes")
@@ -86,6 +120,8 @@ class Style:
     palette: str = F("Okabe-Ito (colour-blind safe)", "Palette (used for groups without a fixed colour)", "Colours", "select", list(PALETTES))
     fill_alpha: float = F(0.85, "Fill opacity", "Colours", lo=0.0, hi=1.0, step=0.05)
     bar_filled: bool = F(True, "Filled bars/boxes (off = outlines)", "Colours")
+    bar_color: str = F("group", "Column bar/box colour: 'group' or a hex like #CCCCCC", "Colours", help="'group' = each group's own colour; a hex colour fills every column bar/box the same (points keep group colours).")
+    error_color: str = F("auto", "Error-bar colour: 'auto' or a hex like #333333", "Colours")
     # ---- column graphs --------------------------------------------------------
     column_mode: str = F("bar", "Column graph style", "Column graphs", "select", ["bar", "box", "violin", "points only"])
     bar_width: float = F(0.6, "Bar/box width", "Column graphs", lo=0.1, hi=1.0, step=0.05)
@@ -99,6 +135,7 @@ class Style:
     point_alpha: float = F(0.9, "Point opacity", "Column graphs", lo=0.0, hi=1.0, step=0.05)
     point_edge_width: float = F(0.6, "Point edge width", "Column graphs", lo=0.0, hi=3.0, step=0.1)
     point_edge: str = F("black", "Point edge colour", "Column graphs", "select", ["black", "match", "white", "darker"])
+    zero_line: bool = F(False, "Draw a line at Y = 0", "Column graphs")
     paired_lines: bool = F(True, "Connect matched points (paired tables)", "Column graphs")
     center: str = F("mean", "Central line", "Column graphs", "select", ["mean", "median", "none"])
     center_width: float = F(0.6, "Central line width (fraction of bar)", "Column graphs", lo=0.1, hi=1.5, step=0.05)
@@ -127,13 +164,15 @@ class Style:
     # ---- legend ---------------------------------------------------------------
     legend_loc: str = F("none", "Legend", "Legend", "select", LEGEND_LOCS)
     legend_frame: bool = F(False, "Legend frame", "Legend")
+    legend_spacing: float = F(1.0, "Legend tightness (1 = normal, smaller = tighter)", "Legend", lo=0.1, hi=2.0, step=0.1)
     # ---- significance ---------------------------------------------------------
     sig_label: str = F("stars", "Significance label", "Significance brackets", "select", ["stars", "p-value", "both"])
     sig_only_significant: bool = F(False, "Only show significant comparisons", "Significance brackets")
     sig_size: float = F(9.0, "Label size", "Significance brackets", lo=4.0, hi=30.0, step=0.5)
     sig_lw: float = F(1.0, "Bracket line width", "Significance brackets", lo=0.0, hi=4.0, step=0.1)
     sig_step: float = F(0.09, "Vertical spacing (fraction of axis)", "Significance brackets", lo=0.02, hi=0.4, step=0.01)
-    sig_ns: bool = F(True, "Label non-significant as 'ns'", "Significance brackets")
+    sig_ns: bool = F(True, "Label non-significant comparisons", "Significance brackets")
+    sig_ns_label: str = F("ns", "Text for non-significant (ns / NS / n.s.)", "Significance brackets")
 
     def merged(self, overrides: dict | None) -> "Style":
         valid = {f.name for f in dc.fields(self)}
@@ -165,6 +204,15 @@ PRESETS = {
                      "tick_width": 2.0, "tick_len": 6, "line_width": 2.5, "error_lw": 2.0, "bar_edge_width": 2.0, "point_size": 45, "sig_size": 16, "dpi": 200},
     "Poster": {"width": 8.0, "height": 6.0, "title_size": 26, "label_size": 22, "tick_size": 20, "legend_size": 20, "spine_width": 3.0, "tick_width": 3.0,
                "tick_len": 9, "line_width": 3.5, "error_lw": 3.0, "bar_edge_width": 3.0, "point_size": 80, "sig_size": 22, "dpi": 150},
+    # Measured from Fig. 5 of "Developmental xenocortication using human-derived organoids in mice" (Nature 658, 2026) plus your specs
+    # (Helvetica; 6 pt numbers, 7 pt other text; tight spacing; #CCCCCC bars, #333333 error bars, short thin ticks/axes). Bar width, point size, error-bar weight were estimated by eye.
+    "Xenocortical Nature style": {"font_family": "Helvetica", "title_size": 7, "label_size": 7, "tick_size": 6, "legend_size": 7, "sig_size": 7, "tick_pad": 1.0, "label_pad": 1.5, "legend_spacing": 0.35,
+                                  "auto_width": True, "height": 1.3, "bar_slot": 0.14, "margin_left": 0.45, "margin_bottom": 0.4, "margin_top": 0.1, "margin_right": 0.08, "dpi": 600, "column_mode": "bar", "bar_color": "#CCCCCC", "error_color": "#333333",
+                                  "bar_edge_width": 0.0, "bar_width": 0.65, "bar_filled": True, "fill_alpha": 1.0, "error": "SEM", "cap_size": 1.5,
+                                  "error_lw": 0.75, "spine_width": 0.5, "tick_width": 0.5, "tick_len": 2.0, "tick_dir": "out", "x_tick_rotation": 45.0,
+                                  "hide_top_right": True, "show_points": True, "point_layout": "jitter", "jitter_width": 0.12, "point_size": 5.0,
+                                  "point_alpha": 1.0, "point_edge": "match", "point_edge_width": 0.0, "zero_line": True, "sig_lw": 0.5,
+                                  "sig_ns_label": "NS", "sig_step": 0.1, "palette": "Bold"},
     "Minimal grayscale": {"palette": "Grayscale", "bar_filled": True, "fill_alpha": 1.0, "point_edge": "black"},
 }
 

@@ -47,6 +47,17 @@ Every test has a validator that runs *before* the Run button is enabled. **Error
 | two-way designs with empty cells, or no replicates + interaction | iterative Grubbs, one-tailed tests |
 | nonlinear: unknown/contradictory constraints, X<0 for concentration models, bad weights, unsafe equations | |
 
+## Journal-style presets (e.g. "Xenocortical Nature style")
+
+Apply from ④ Consistency → *Apply a format to the whole project*. The preset was built from Fig. 5 of *Developmental xenocortication using human-derived
+organoids in mice* (Nature 658, 2026) plus the lab's specs: Helvetica, 6 pt numbers / 7 pt other text, #CCCCCC bars, #333333 s.e.m. error bars, short thin ticks,
+tight tick-label / axis-title / legend spacing, **fixed 1.3 in height with width set by the number of bars** (`auto_width`; plot area = bars x slot width).
+Bar width, point size and error-bar weight were estimated by eye from the figure, not measured from vector data.
+If content does not fit in the fixed height (e.g. long rotated labels) the graph shows a warning instead of silently resizing.
+
+**Helvetica:** it is a licensed font and is not bundled. `Helvetica` resolves to *Nimbus Sans* (open-source, metric-compatible clone in `plotsuite/fonts/`, AGPL with the PDF-embedding exception).
+To use real Helvetica, put your licensed `.otf/.ttf` files in a folder and set `PLOTSUITE_FONTS=/path/to/folder` before starting the app.
+
 ## Statistics included
 
 *Descriptive:* column statistics, normality battery (Shapiro-Wilk, D'Agostino-Pearson, Anderson-Darling, Lilliefors), variance tests (Brown-Forsythe, Bartlett, F).

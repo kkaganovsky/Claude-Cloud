@@ -444,6 +444,8 @@ def tab_graph():
         style = p.effective_style(g)
         comps, results = plots.analyses_for(p, g)
         fig = plots.render(g, ds, style, p.gs(style), comps, results)
+        if getattr(fig, "_ps_clipped", None):
+            st.warning(fig._ps_clipped)
         st.image(plots.export(fig, "png", 150), caption=None)
         if g.overrides:
             st.caption("Graph-specific settings: " + ", ".join(sorted(g.overrides)))

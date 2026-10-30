@@ -73,7 +73,8 @@ def test_no_dead_settings_every_control_changes_some_graph():
     p.datasets["m"] = Dataset("m", "column", pd.DataFrame({"a": rng.normal(5, 1, 20), "b": rng.normal(6, 1, 20)}), paired=True)
     m2 = pd.DataFrame({"a": rng.normal(5, 1, 20), "b": rng.normal(6, 1, 20)}); m2.loc[0, "a"] = 12.0  # an outlier so whisker/flier settings matter
     p.datasets["m2"] = Dataset("m2", "column", m2)
-    graphs = [GraphSpec("c-bar", "m2", "column", {}, {"column_mode": "bar", "show_points": True, "legend_loc": "upper right", "title": "T", "grid": "both"}),
+    p.datasets["neg"] = Dataset("neg", "column", pd.DataFrame({"a": rng.normal(0, 1, 12), "b": rng.normal(-1, 1, 12)}))  # negatives, so a Y=0 line is visible
+    graphs = [GraphSpec("negbars", "neg", "column", {}, {"column_mode": "bar"}), GraphSpec("c-bar", "m2", "column", {}, {"column_mode": "bar", "show_points": True, "legend_loc": "upper right", "title": "T", "grid": "both", "auto_width": True, "bar_color": "#CCCCCC", "error_color": "#333333", "zero_line": False}),
               GraphSpec("c-box", "m2", "column", {}, {"column_mode": "box"}), GraphSpec("c-vio", "m2", "column", {}, {"column_mode": "violin"}),
               p.graphs[0],
               GraphSpec("c-pts", "m2", "column", {}, {"column_mode": "points only"}),
@@ -92,7 +93,7 @@ def test_no_dead_settings_every_control_changes_some_graph():
             return type(v)(meta["lo"] + (meta["hi"] - meta["lo"]) * (0.2 if v > (meta["lo"] + meta["hi"]) / 2 else 0.8))
         if w == "opt_float":
             return {"y_min": -3.0, "y_max": 40.0, "y_major_step": 7.0, "y_decimals": 3.0, "x_min": 0.001, "x_max": 5.0, "x_major_step": 3.0}[name]
-        return "TEXT"
+        return {"bar_color": "#FF0000", "error_color": "#00AA00", "sig_ns_label": "NS"}.get(name, "TEXT")
     baseline = {g.id: png(render(p, g)) for g in graphs}
     skip = {"dpi"}  # only used at export time
     dead = []
@@ -231,3 +232,62 @@ def test_axis_limits_and_scales_are_applied():
     w, h = f.get_size_inches(); assert (w, h) == (p.theme.width, p.theme.height)
     g.overrides.update({"width": 5.0, "height": 2.5}); f = render(p, g); assert tuple(f.get_size_inches()) == (5.0, 2.5)
     xy = p.graphs[3]; xy.overrides["x_scale"] = "log"; assert render(p, xy).axes[0].get_xscale() == "log"
+
+
+def test_xenocortical_preset_fixed_height_variable_width_and_clip_warning():
+    from plotsuite.style import PRESETS, resolve_font
+    p = example_project(); p.theme = Style.from_dict({**Style().to_dict(), **PRESETS["Xenocortical Nature style"]})
+    for g in p.graphs:
+        g.overrides = {}
+    sizes = {}
+    for g in p.graphs[:3]:
+        f = render(p, g); sizes[g.name] = f.get_size_inches()
+        assert f.get_size_inches()[1] == pytest.approx(1.3)
+        assert plots.export(f, "png", 200)  # exact size kept on export
+    from PIL import Image
+    import io
+    im = Image.open(io.BytesIO(plots.export(render(p, p.graphs[0]), "png", 200)))
+    assert im.size[1] == 260  # 1.3 in x 200 dpi, no cropping
+    pr = PRESETS["Xenocortical Nature style"]
+    assert sizes["Dose groups"][0] == pytest.approx(pr["margin_left"] + 3 * pr["bar_slot"] + pr["margin_right"])  # 3 bars
+    assert sizes["Before-after"][0] < sizes["Dose groups"][0] < sizes["Genotype x time"][0]
+    st = p.effective_style(p.graphs[0])
+    assert st.font_family == "Helvetica" and st.tick_size == 6 and st.label_size == 7 and st.tick_pad == 1.0 and st.legend_spacing < 0.5 and st.bar_color == "#CCCCCC" and st.error_color == "#333333"
+    assert resolve_font("Helvetica") in ("Helvetica", "Nimbus Sans", "Arial", "Liberation Sans")
+    f = render(p, p.graphs[0]); ax = f.axes[0]
+    bars = ax.patches
+    assert all(tuple(round(c, 3) for c in b.get_facecolor()[:3]) == (0.8, 0.8, 0.8) for b in bars[:3])
+    assert not hasattr(f, "_ps_clipped")  # with tight spacing the 45-degree labels fit in 0.4 in
+    p.theme = p.theme.merged({"margin_bottom": 0.15}); assert "bottom" in render(p, p.graphs[0])._ps_clipped  # too little room -> warned, not silently resized
+    p.theme = p.theme.merged({"margin_bottom": 0.4}); assert not hasattr(render(p, p.graphs[0]), "_ps_clipped")
+
+
+def test_grouped_levels_keep_data_order():
+    p = example_project(); g = p.graphs[2]
+    lab = [t.get_text() for t in render(p, g).axes[0].get_xticklabels()]
+    assert lab == ["Day 0", "Day 7", "Day 14"]
+
+
+def test_bracket_spacing_scales_with_label_size():
+    p = example_project(); g = p.graphs[0]
+    p.theme = p.theme.merged({"auto_width": True, "height": 1.3, "sig_size": 7.0})
+    f = render(p, g); ax = f.axes[0]
+    ys = sorted({round(l.get_ydata()[0], 3) for l in ax.lines if len(l.get_xdata()) == 4})
+    h_in = ax.get_position().height * f.get_figheight(); rng = ax.get_ylim()[1] - ax.get_ylim()[0]
+    gaps = [(b - a) / rng * h_in * 72 for a, b in zip(ys, ys[1:])]
+    assert all(gp >= 7.0 for gp in gaps), gaps  # at least one text height (pt) between tiers
+
+
+def test_diagonal_tick_labels_end_on_their_tick():
+    """For rotated labels the letter nearest the axis must be centred on the tick (text ends at the tick, not hangs left of it)."""
+    p = example_project(); g = p.graphs[0]
+    p.theme = p.theme.merged({"auto_width": True, "height": 1.3, "x_tick_rotation": 45.0, "margin_bottom": 0.5})
+    f = render(p, g); ax = f.axes[0]
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    c = FigureCanvasAgg(f); c.draw(); r = c.get_renderer()
+    for lab, tick in zip(ax.get_xticklabels(), ax.get_xticks()):
+        bb = lab.get_window_extent(r)
+        x_tick = ax.transData.transform((tick, 0))[0]
+        # the label's right end (nearest letter) sits at the tick, within half a letter; text extends to the LEFT
+        assert abs(bb.x1 - x_tick) < 0.6 * p.theme.tick_size / 72 * f.dpi, (lab.get_text(), bb.x1, x_tick)
+        assert bb.x0 < x_tick

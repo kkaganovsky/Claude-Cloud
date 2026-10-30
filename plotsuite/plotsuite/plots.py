@@ -22,11 +22,16 @@ GStyle = Callable[[str], dict]
 
 # ------------------------------------------------------------------ helpers
 def font_family(name: str) -> str:
-    try:
-        font_manager.findfont(name, fallback_to_default=False)
-        return name
-    except Exception:
-        return "DejaVu Sans"
+    from .style import resolve_font
+    return resolve_font(name) or "DejaVu Sans"
+
+
+def color_or_default(value: str, default, what: str):
+    if value in ("group", "auto"):
+        return default
+    if not mcolors.is_color_like(value):
+        raise ValueError(f"{what} '{value}' is not a colour (use e.g. #CCCCCC).")
+    return value
 
 
 def rc_for(style: Style) -> dict:
@@ -80,8 +85,10 @@ def edge_color(style: Style, col):
 def fmt_p_label(p: float, style: Style) -> str:
     from .stats import stars, fmt_p
     s = stars(p)
-    if s == "ns" and not style.sig_ns and style.sig_label == "stars":
-        return ""
+    if s == "ns":
+        if not style.sig_ns and style.sig_label == "stars":
+            return ""
+        s = style.sig_ns_label
     if style.sig_label == "stars":
         return s
     pl = ("p " + fmt_p(p)) if style.sig_label == "p-value" else None
@@ -106,16 +113,23 @@ def draw_brackets(ax, comps, xpos: dict, style: Style, y_start: float, rng: floa
         else:
             tiers.append([it])
     top = y_start
-    tick = style.sig_step * rng * 0.35
+    bb = ax.get_position(); h_in = max(bb.height * ax.figure.get_figheight(), 1e-3)
+    # The axis range grows to fit the brackets, which shrinks every gap. Solve for the step that still leaves >= one text height
+    # between tiers in the FINAL scale:  R' = R0 / (1 - n*g*k),  step = g * R'   (g = text height / axes height, k covers tick + label)
+    g_frac = max(style.sig_step, style.sig_size * (2.3 if style.sig_label == "both" else 1.5) / 72 / h_in)
+    n_t = max(len(tiers), 1); k = 1.35
+    room = max(1 - n_t * g_frac * k, 0.25)
+    step_frac = g_frac / room * (1.0)  # fraction of the ORIGINAL range R0 (= rng)
+    tick = step_frac * rng * 0.35
     for ti, tier in enumerate(tiers):
-        y = y_start + ti * style.sig_step * rng
+        y = y_start + ti * step_frac * rng
         for _, xa, xb, c in tier:
             ax.plot([xa, xa, xb, xb], [y, y + tick, y + tick, y], color="black", lw=style.sig_lw, clip_on=False, solid_capstyle="butt")
             lab = fmt_p_label(c.p, style)
             if lab:
-                gap = tick * 0.8 if lab.strip("*") == "" else tick * 0.8 + 0.012 * rng  # asterisks sit high in the glyph box; words need a little air
+                gap = tick * 0.8 if lab.strip("*") == "" else tick * 0.8 + 1.5 / 72 / h_in * rng  # asterisks sit high in the glyph box; words need ~1.5 pt of air
                 ax.text((xa + xb) / 2, y + gap, lab, ha="center", va="bottom", fontsize=style.sig_size, linespacing=0.9, fontweight="normal")
-        top = y + tick + style.sig_step * rng * (1.6 if style.sig_label == "both" else 1.0)
+        top = y + tick + step_frac * rng * (1.6 if style.sig_label == "both" else 1.0)
     return top
 
 
@@ -126,12 +140,12 @@ def finish_axes(ax, style: Style, xlabel="", ylabel="", categorical=False):
         s.set_linewidth(style.spine_width)
     if style.spine_offset:
         ax.spines["left"].set_position(("outward", style.spine_offset)); ax.spines["bottom"].set_position(("outward", style.spine_offset))
-    ax.tick_params(direction=style.tick_dir, length=style.tick_len, width=style.tick_width, labelsize=style.tick_size)
+    ax.tick_params(direction=style.tick_dir, length=style.tick_len, width=style.tick_width, labelsize=style.tick_size, pad=style.tick_pad)
     fw = "bold" if style.bold_labels else "normal"
-    ax.set_xlabel(style.x_label or xlabel, fontsize=style.label_size, fontweight=fw)
-    ax.set_ylabel(style.y_label or ylabel, fontsize=style.label_size, fontweight=fw)
+    ax.set_xlabel(style.x_label or xlabel, fontsize=style.label_size, fontweight=fw, labelpad=style.label_pad)
+    ax.set_ylabel(style.y_label or ylabel, fontsize=style.label_size, fontweight=fw, labelpad=style.label_pad)
     if style.title:
-        ax.set_title(style.title, fontsize=style.title_size, fontweight=fw)
+        ax.set_title(style.title, fontsize=style.title_size, fontweight=fw, pad=style.label_pad)
     ax.set_yscale(style.y_scale)
     if not categorical:
         ax.set_xscale(style.x_scale)
@@ -156,15 +170,40 @@ def finish_axes(ax, style: Style, xlabel="", ylabel="", categorical=False):
         ax.grid(True, axis={"y": "y", "x": "x", "both": "both"}[style.grid], alpha=style.grid_alpha, lw=.6)
         ax.set_axisbelow(True)
     if style.x_tick_rotation:
-        for l in ax.get_xticklabels():
-            l.set_rotation(style.x_tick_rotation); l.set_ha("right" if style.x_tick_rotation < 80 else "center")
+        rot_x_labels(ax, style)
     ax.patch.set_alpha(0)
+
+
+def rot_x_labels(ax, style: Style):
+    """Rotated category labels: text ENDS at its tick, and the letter nearest the axis is centred on the tick.
+
+    rotation_mode='anchor' rotates about the anchor point (right-centre of the text) instead of the bounding box, so the end of the word sits on the
+    tick for any angle; a half-letter shift along the text direction then centres the last letter on the tick.
+    """
+    import matplotlib.transforms as mtr
+    from matplotlib.font_manager import FontProperties
+    from matplotlib.textpath import TextPath
+    th = np.deg2rad(style.x_tick_rotation)
+    fp = FontProperties(family=font_family(style.font_family))
+    for l in ax.get_xticklabels():
+        txt = l.get_text()
+        if not txt:
+            continue
+        l.set_rotation(style.x_tick_rotation)
+        if style.x_tick_rotation >= 80:
+            l.set_ha("center"); continue
+        l.set_rotation_mode("anchor"); l.set_ha("right"); l.set_va("center")
+        w = TextPath((0, 0), txt[-1], size=style.tick_size, prop=fp).get_extents().width  # width of the last letter, in points
+        # shift along the text direction (toward the end of the word) by half a letter width; then the letter is centred on the tick
+        l.set_transform(l.get_transform() + mtr.ScaledTranslation(0.5 * w * np.cos(th) / 72, 0.5 * w * np.sin(th) / 72, ax.figure.dpi_scale_trans))
 
 
 def add_legend(ax, handles, style: Style):
     if style.legend_loc == "none" or not handles:
         return
-    kw = dict(fontsize=style.legend_size, frameon=style.legend_frame, handlelength=1.2)
+    k = style.legend_spacing
+    kw = dict(fontsize=style.legend_size, frameon=style.legend_frame, handlelength=1.2 * k, handletextpad=0.8 * k, labelspacing=0.5 * k,
+              borderpad=0.4 * k, borderaxespad=0.5 * k, columnspacing=2.0 * k)
     if style.legend_loc == "outside right":
         ax.legend(handles=handles, loc="center left", bbox_to_anchor=(1.02, .5), **kw)
     else:
@@ -211,7 +250,9 @@ def draw_column(ax, ds: Dataset, params: dict, style: Style, gs: GStyle, comps=N
     all_v = np.concatenate([g[n] for n in names])
     handles = []
     for i, n in enumerate(names):
-        v = g[n]; s = gs(n); col = s["color"]; hatch = s.get("hatch")
+        v = g[n]; s = gs(n); pcol = s["color"]; hatch = s.get("hatch")
+        col = color_or_default(style.bar_color, pcol, "Bar colour")  # fill colour of the bar/box/violin
+        ecol = color_or_default(style.error_color, None, "Error-bar colour")
         c, lo, hi = center_err(v, "mean" if style.center == "none" else style.center, style.error)
         w = style.bar_width
         if style.column_mode == "bar":
@@ -240,11 +281,11 @@ def draw_column(ax, ds: Dataset, params: dict, style: Style, gs: GStyle, comps=N
                 ax.plot([i], [q2], "o", color="white", ms=3, zorder=4)
         if style.column_mode in ("bar", "points only"):
             if style.error != "none" and len(v) > 1:
-                ax.errorbar(i, c, yerr=[[c - lo], [hi - c]], color=darker(col, .5) if style.column_mode == "bar" else darker(col), capsize=style.cap_size,
+                ax.errorbar(i, c, yerr=[[c - lo], [hi - c]], color=ecol or (darker(col, .5) if style.column_mode == "bar" else darker(col)), capsize=style.cap_size,
                             capthick=style.error_lw, elinewidth=style.error_lw, zorder=5, fmt="none")
             if style.column_mode == "points only" and style.center != "none":
                 ax.plot([i - w * style.center_width / 2, i + w * style.center_width / 2], [c, c], color=darker(col, .5), lw=style.center_lw, zorder=5, solid_capstyle="butt")
-        handles.append(patch_handle(col, style, n))
+        handles.append(patch_handle(pcol, style, n))
     # points
     paired = ds.paired and style.paired_lines and len(names) > 1 and style.show_points
     if style.show_points:
@@ -269,6 +310,8 @@ def draw_column(ax, ds: Dataset, params: dict, style: Style, gs: GStyle, comps=N
                        edgecolor=edge_color(style, s["color"]), linewidth=style.point_edge_width, zorder=4, clip_on=False)
     ax.set_xticks(range(len(names))); ax.set_xticklabels(names)
     ax.set_xlim(-0.6, len(names) - 0.4)
+    if style.zero_line:
+        ax.axhline(0, color="black", lw=style.spine_width, zorder=1)
     top_data = max(float(all_v.max()), max(center_err(g[n], "mean", style.error)[2] if style.error != "none" else g[n].mean() for n in names))
     lo_data = min(0.0, float(all_v.min())) if style.column_mode == "bar" and all_v.min() > -np.inf and style.y_scale == "linear" else float(all_v.min())
     pad = (top_data - lo_data) * 0.06 or 1
@@ -296,7 +339,7 @@ def draw_grouped(ax, ds: Dataset, params: dict, style: Style, gs: GStyle, comps=
     xf, hf = ("a", "b") if params.get("x_factor", "a") == "a" else ("b", "a")
     if hf not in t:
         t["_h"] = ds.roles.get("value", "value"); hf = "_h"
-    xl = sorted(t[xf].unique(), key=_key); hl = sorted(t[hf].unique(), key=_key)
+    xl = list(t[xf].unique()); hl = list(t[hf].unique())  # keep the order the data were entered in (like Prism)
     nh = len(hl)
     gap = style.group_gap
     bw = (1 - gap) / nh if style.grouped_mode == "bars" else 0.0
@@ -520,24 +563,57 @@ def draw_graph(ax, spec, ds: Dataset, style: Style, gs: GStyle, comps=None, resu
         raise ValueError(f"unknown graph kind {k}")
 
 
+def n_bars(spec, ds: Dataset) -> int:
+    """Number of bar slots a graph needs (drives auto-width)."""
+    k = spec.kind
+    if k == "column":
+        g = ds.group_names(); return len([n for n in (spec.params.get("groups") or g) if n in g]) or 1
+    if k == "grouped":
+        t = ds.long(); xf, hf = ("a", "b") if spec.params.get("x_factor", "a") == "a" else ("b", "a")
+        return max(1, t[xf].nunique() * (t[hf].nunique() if hf in t else 1))
+    if k == "stacked":
+        return max(1, len(ds.counts()))
+    return 3
+
+
 def render(spec, ds: Dataset, style: Style, gs: GStyle, comps=None, results=None) -> Figure:
-    fig = Figure(figsize=(style.width, style.height), dpi=100, facecolor="none" if style.background == "transparent" else "white")
+    exact = style.auto_width and spec.kind in ("column", "grouped", "stacked")
+    if exact:
+        n = n_bars(spec, ds)
+        W = style.margin_left + n * style.bar_slot + style.margin_right
+        H = style.height
+    else:
+        W, H = style.width, style.height
+    fig = Figure(figsize=(W, H), dpi=100, facecolor="none" if style.background == "transparent" else "white")
     fig._ps_rc = rc_for(style)
+    fig._ps_exact = exact
     with mpl.rc_context(fig._ps_rc):
-        ax = fig.add_subplot(111)
+        if exact:
+            ax = fig.add_axes([style.margin_left / W, style.margin_bottom / H, n * style.bar_slot / W, (H - style.margin_bottom - style.margin_top) / H])
+        else:
+            ax = fig.add_subplot(111)
         try:
             draw_graph(ax, spec, ds, style, gs, comps, results)
         except Exception as e:  # show the reason on the canvas, never a stack trace
             ax.clear(); message(ax, f"Cannot draw this graph:\n{e}", style)
             fig._ps_error = str(e)
-        fig.tight_layout(pad=0.6)
+        if not exact:
+            fig.tight_layout(pad=0.6)
+        elif not hasattr(fig, "_ps_error"):
+            from matplotlib.backends.backend_agg import FigureCanvasAgg
+            canvas = FigureCanvasAgg(fig); canvas.draw()
+            bb = fig.get_tightbbox(canvas.get_renderer()); W_, H_ = fig.get_size_inches()
+            over = {k: v for k, v in dict(left=-bb.x0, bottom=-bb.y0, right=bb.x1 - W_, top=bb.y1 - H_).items() if v > 0.01}
+            if over:
+                fig._ps_clipped = "Content is cut off at the " + ", ".join(f"{k} (by {v:.2f} in)" for k, v in over.items()) + \
+                                  " - increase that margin, shorten labels, or reduce rotation/font size."
     return fig
 
 
 def export(fig: Figure, fmt: str = "png", dpi: int = 300, transparent: bool = False) -> bytes:
     buf = io.BytesIO()
     with mpl.rc_context(getattr(fig, "_ps_rc", {})):
-        fig.savefig(buf, format=fmt, dpi=dpi, transparent=transparent, bbox_inches="tight" if fmt != "svg" else None, pad_inches=0.05)
+        fig.savefig(buf, format=fmt, dpi=dpi, transparent=transparent, bbox_inches="tight" if (fmt != "svg" and not getattr(fig, "_ps_exact", False)) else None, pad_inches=0.05)
     return buf.getvalue()
 
 

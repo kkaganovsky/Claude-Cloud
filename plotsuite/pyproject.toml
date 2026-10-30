@@ -21,6 +21,9 @@ plotsuite = "plotsuite.__main__:main"
 [tool.setuptools]
 packages = ["plotsuite", "plotsuite.stats"]
 
+[tool.setuptools.package-data]
+plotsuite = ["fonts/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 filterwarnings = ["ignore"]
