@@ -17,6 +17,7 @@ test = ["pytest"]
 
 [project.scripts]
 plotsuite = "plotsuite.__main__:main"
+plotsuite-plot = "plotsuite.cli:main"
 
 [tool.setuptools]
 packages = ["plotsuite", "plotsuite.stats"]

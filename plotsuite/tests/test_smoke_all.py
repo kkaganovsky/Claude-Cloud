@@ -71,3 +71,23 @@ def test_all_tests_run_wherever_they_validate():
                 ran.add(key)
     never = set(S.REGISTRY) - ran
     assert not never, f"tests that never ran on any example table: {sorted(never)}"
+
+
+def test_cli_end_to_end(tmp_path, capsys):
+    from plotsuite.cli import main
+    csv = tmp_path / "d.csv"
+    rng = np.random.default_rng(3)
+    pd.DataFrame({"Ctrl": rng.normal(10, 1, 8), "Low": rng.normal(12, 1, 8), "High": rng.normal(15, 1, 8)}).to_csv(csv, index=False)
+    out = tmp_path / "f.pdf"
+    assert main([str(csv), "-o", str(out), "--test", "oneway_anova", "--opt", "posthoc=tukey", "--set", "y_label=Cells", "--results", str(tmp_path / "s.xlsx"),
+                 "--save-project", str(tmp_path / "p.json")]) == 0
+    assert out.read_bytes()[:4] == b"%PDF" and (tmp_path / "s.xlsx").exists() and (tmp_path / "p.json").exists()
+    assert "1.30" in capsys.readouterr().out  # fixed 1.3 in height reported
+    # guardrail: a t test on three groups is refused with exit code 2 and no figure
+    out2 = tmp_path / "g.pdf"
+    assert main([str(csv), "-o", str(out2), "--test", "unpaired_t"]) == 2 and not out2.exists()
+    assert "exactly two" in capsys.readouterr().err
+    assert main([str(csv), "-o", str(out2), "--preset", "nope"]) == 2
+    assert main([str(csv), "-o", str(out2), "--set", "bogus=1"]) == 2
+    assert main([str(csv), "--list-tests"]) == 0 and "oneway_anova" in capsys.readouterr().out
+    assert main(["--list-fields"]) == 0

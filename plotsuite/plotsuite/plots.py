@@ -195,7 +195,9 @@ def rot_x_labels(ax, style: Style):
         l.set_rotation_mode("anchor"); l.set_ha("right"); l.set_va("center")
         w = TextPath((0, 0), txt[-1], size=style.tick_size, prop=fp).get_extents().width  # width of the last letter, in points
         # shift along the text direction (toward the end of the word) by half a letter width; then the letter is centred on the tick
-        l.set_transform(l.get_transform() + mtr.ScaledTranslation(0.5 * w * np.cos(th) / 72, 0.5 * w * np.sin(th) / 72, ax.figure.dpi_scale_trans))
+        # with va='center' the end corner of the box pokes up by half the text height * cos(angle): push the label down by that plus the requested gap
+        down = 0.5 * 0.72 * style.tick_size * np.cos(th) + style.rot_label_gap
+        l.set_transform(l.get_transform() + mtr.ScaledTranslation(0.5 * w * np.cos(th) / 72, (0.5 * w * np.sin(th) - down) / 72, ax.figure.dpi_scale_trans))
 
 
 def add_legend(ax, handles, style: Style):

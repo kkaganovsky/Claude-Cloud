@@ -74,7 +74,7 @@ def test_no_dead_settings_every_control_changes_some_graph():
     m2 = pd.DataFrame({"a": rng.normal(5, 1, 20), "b": rng.normal(6, 1, 20)}); m2.loc[0, "a"] = 12.0  # an outlier so whisker/flier settings matter
     p.datasets["m2"] = Dataset("m2", "column", m2)
     p.datasets["neg"] = Dataset("neg", "column", pd.DataFrame({"a": rng.normal(0, 1, 12), "b": rng.normal(-1, 1, 12)}))  # negatives, so a Y=0 line is visible
-    graphs = [GraphSpec("negbars", "neg", "column", {}, {"column_mode": "bar"}), GraphSpec("c-bar", "m2", "column", {}, {"column_mode": "bar", "show_points": True, "legend_loc": "upper right", "title": "T", "grid": "both", "auto_width": True, "bar_color": "#CCCCCC", "error_color": "#333333", "zero_line": False}),
+    graphs = [GraphSpec("negbars", "neg", "column", {}, {"column_mode": "bar"}), GraphSpec("c-bar", "m2", "column", {}, {"column_mode": "bar", "show_points": True, "legend_loc": "upper right", "title": "T", "grid": "both", "auto_width": True, "bar_color": "#CCCCCC", "error_color": "#333333", "zero_line": False, "x_tick_rotation": 45.0}),
               GraphSpec("c-box", "m2", "column", {}, {"column_mode": "box"}), GraphSpec("c-vio", "m2", "column", {}, {"column_mode": "violin"}),
               p.graphs[0],
               GraphSpec("c-pts", "m2", "column", {}, {"column_mode": "points only"}),
@@ -291,3 +291,33 @@ def test_diagonal_tick_labels_end_on_their_tick():
         # the label's right end (nearest letter) sits at the tick, within half a letter; text extends to the LEFT
         assert abs(bb.x1 - x_tick) < 0.6 * p.theme.tick_size / 72 * f.dpi, (lab.get_text(), bb.x1, x_tick)
         assert bb.x0 < x_tick
+
+
+def _ink_gaps(p, g, gap, dpi=400):
+    """Pixel gap (in points) between the end of each tick mark and the first ink of its rotated label, measured on the rendered image."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    p.theme = p.theme.merged({"auto_width": True, "height": 1.3, "x_tick_rotation": 45.0, "margin_bottom": 0.6, "tick_pad": 1.0, "rot_label_gap": gap, "spine_width": 0.5,
+                              "tick_width": 0.5, "tick_len": 2.0})
+    f = render(p, g); f.set_dpi(dpi); c = FigureCanvasAgg(f); c.draw()
+    img = np.asarray(c.buffer_rgba())[..., :3].min(axis=2) < 110  # dark pixels
+    ax = f.axes[0]; H = img.shape[0]
+    y_axis = H - ax.transAxes.transform((0, 0))[1]  # pixel row of the x axis line
+    gaps = []
+    for t in ax.get_xticks():
+        x = int(round(ax.transData.transform((t, 0))[0]))
+        col = img[int(y_axis) + 1:, x]  # tick mark = dark run directly below the axis at the tick column
+        run = 0
+        while run < len(col) and col[run]:
+            run += 1
+        tick_end = int(y_axis) + 1 + run
+        win = img[tick_end:, x - 6: x + 7]
+        rows = np.where(win.any(axis=1))[0]
+        gaps.append((rows[0]) / dpi * 72 if len(rows) else np.nan)
+    return gaps
+
+
+def test_rotated_labels_keep_a_clear_gap_below_the_tick():
+    p = example_project(); g = p.graphs[0]
+    small, big = _ink_gaps(p, g, 1.5), _ink_gaps(p, g, 4.0)
+    assert all(x >= 1.0 for x in small), small  # >= ~1.5 pt (2 px @ 96 dpi) of white between tick end and text, minus antialiasing slack
+    assert all(b - s > 2.0 for s, b in zip(small, big)), (small, big)  # the setting really moves the text

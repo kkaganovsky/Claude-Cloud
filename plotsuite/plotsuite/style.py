@@ -111,6 +111,7 @@ class Style:
     tick_dir: str = F("out", "Tick direction", "Axes", "select", ["out", "in", "inout"])
     tick_pad: float = F(3.5, "Gap between tick and tick label (pt)", "Axes", lo=0.0, hi=15.0, step=0.5)
     label_pad: float = F(4.0, "Gap between tick labels and axis title (pt)", "Axes", lo=0.0, hi=20.0, step=0.5)
+    rot_label_gap: float = F(1.5, "Clear gap between tick end and rotated label (pt; 1.5 pt = 2 px at 96 dpi)", "Axes", lo=0.0, hi=10.0, step=0.25)
     tick_len: float = F(3.5, "Tick length", "Axes", lo=0.0, hi=15.0, step=0.5)
     tick_width: float = F(1.0, "Tick width", "Axes", lo=0.0, hi=5.0, step=0.1)
     minor_ticks: bool = F(False, "Minor ticks", "Axes")
@@ -206,7 +207,7 @@ PRESETS = {
                "tick_len": 9, "line_width": 3.5, "error_lw": 3.0, "bar_edge_width": 3.0, "point_size": 80, "sig_size": 22, "dpi": 150},
     # Measured from Fig. 5 of "Developmental xenocortication using human-derived organoids in mice" (Nature 658, 2026) plus your specs
     # (Helvetica; 6 pt numbers, 7 pt other text; tight spacing; #CCCCCC bars, #333333 error bars, short thin ticks/axes). Bar width, point size, error-bar weight were estimated by eye.
-    "Xenocortical Nature style": {"font_family": "Helvetica", "title_size": 7, "label_size": 7, "tick_size": 6, "legend_size": 7, "sig_size": 7, "tick_pad": 1.0, "label_pad": 1.5, "legend_spacing": 0.35,
+    "Xenocortical Nature style": {"font_family": "Helvetica", "title_size": 7, "label_size": 7, "tick_size": 6, "legend_size": 7, "sig_size": 7, "tick_pad": 1.0, "label_pad": 1.5, "rot_label_gap": 1.5, "legend_spacing": 0.35,
                                   "auto_width": True, "height": 1.3, "bar_slot": 0.14, "margin_left": 0.45, "margin_bottom": 0.4, "margin_top": 0.1, "margin_right": 0.08, "dpi": 600, "column_mode": "bar", "bar_color": "#CCCCCC", "error_color": "#333333",
                                   "bar_edge_width": 0.0, "bar_width": 0.65, "bar_filled": True, "fill_alpha": 1.0, "error": "SEM", "cap_size": 1.5,
                                   "error_lw": 0.75, "spine_width": 0.5, "tick_width": 0.5, "tick_len": 2.0, "tick_dir": "out", "x_tick_rotation": 45.0,
