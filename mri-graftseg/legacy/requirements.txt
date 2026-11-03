@@ -1,0 +1,34 @@
+# Minimal environment for the graft-segmentation retraining pipeline
+# (prepare_pa_data.py, generate_splits.py, run_training.sh)
+#
+# Python >= 3.10 required.
+# Install:  pip install -r requirements.txt
+#
+# Note on PyTorch: nnunetv2 pulls in torch automatically; on Linux the
+# default pip wheel is CUDA-enabled. If you need a specific CUDA version,
+# install torch first from https://pytorch.org, then install this file.
+
+# Core framework — provides nnUNetv2_train, nnUNetv2_predict,
+# nnUNetv2_plan_and_preprocess, nnUNetv2_find_best_configuration.
+# Also brings torch, batchgenerators, nibabel, scikit-image, etc.
+nnunetv2>=2.3
+
+# Directly imported by prepare_pa_data.py for .nrrd <-> .nii.gz conversion
+# (also an nnunetv2 dependency; listed explicitly since the script needs it)
+SimpleITK>=2.3
+
+# --- Labeling / inference workflow (predict_grafts.py) ---
+# NIfTI reading/writing
+nibabel>=5.0
+# NRRD reading/writing (PA_XX .seg.nrrd export)
+pynrrd>=0.9
+# DICOM header reading
+pydicom>=2.4
+# Image filtering (connected components, smoothing)
+scipy>=1.10
+# tkinter is needed for the GUI review editor but is NOT pip-installable:
+#   Ubuntu/Debian:  sudo apt install python3-tk
+#   Fedora:         sudo dnf install python3-tkinter
+
+# NOT needed:
+#   medsam2 etc.   - MedSAM2 inference is unrelated to this pipeline
