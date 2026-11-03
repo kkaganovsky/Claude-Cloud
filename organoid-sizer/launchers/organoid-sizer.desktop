@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Organoid Sizer
+Comment=Measure organoid size with Cellpose
+# Edit the path below to where you put organoid-sizer, then copy this file to ~/.local/share/applications/
+Exec=/path/to/organoid-sizer/launchers/organoid-sizer.sh
+Terminal=true
+Categories=Science;Education;

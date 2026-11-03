@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "organoid-sizer"
+version = "1.0.0"
+description = "Semi-automatic organoid size quantification with Cellpose and a browser-based editor"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "BSD-3-Clause" }
+# All of these come with Cellpose. OpenCV is not listed so pip never installs a second, clashing copy next to
+# the one Cellpose brought; without Cellpose use:  pip install -e ".[standalone]"
+dependencies = ["numpy", "scipy", "pillow", "tifffile"]
+
+[project.optional-dependencies]
+cellpose = ["cellpose"]
+standalone = ["opencv-python-headless"]
+microscopy = ["nd2", "readlif", "czifile"]
+test = ["pytest"]
+
+[project.scripts]
+organoid-sizer = "organoid_sizer.__main__:main"
+
+[tool.setuptools]
+packages = ["organoid_sizer"]
+
+[tool.setuptools.package-data]
+organoid_sizer = ["static/*"]

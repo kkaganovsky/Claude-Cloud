@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Organoid Sizer</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='12' cy='14' r='8' fill='%2314b8a6'/%3E%3Ccircle cx='22' cy='20' r='6' fill='%236366f1'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <!-- ============================== TOP BAR -->
+  <header class="topbar">
+    <button class="icon-btn only-narrow" id="btnToggleLeft" title="Images"><i data-i="images"></i></button>
+    <div class="brand"><span class="logo"></span><span class="brand-name">Organoid&nbsp;Sizer</span></div>
+    <button class="chip folder-chip" id="btnFolder" title="Open a folder of images">
+      <i data-i="folder"></i><span id="folderLabel">Open a folder…</span>
+    </button>
+    <div class="grow"></div>
+    <div class="job" id="job" hidden>
+      <div class="job-text" id="jobText">Working…</div>
+      <div class="progress"><div id="jobBar"></div></div>
+    </div>
+    <button class="btn ghost hide-narrow" id="btnAddFiles" title="Add image files (or drag & drop them anywhere)"><i data-i="plus"></i>Add images</button>
+    <button class="btn primary" id="btnDetectAll" title="Detect organoids in every image"><i data-i="sparkle"></i><span class="hide-narrow">Detect all</span></button>
+    <button class="btn" id="btnExportAll" title="Write CSV files for all images"><i data-i="download"></i><span class="hide-narrow">Export all</span></button>
+    <button class="icon-btn" id="btnSettings" title="Display settings"><i data-i="gear"></i></button>
+    <button class="icon-btn" id="btnHelp" title="Help & keyboard shortcuts (?)"><i data-i="help"></i></button>
+    <button class="icon-btn only-mid" id="btnToggleRight" title="Panel"><i data-i="panel"></i></button>
+    <input type="file" id="fileInput" multiple hidden>
+  </header>
+
+  <!-- ============================== IMAGE LIST -->
+  <aside class="sidebar left" id="left">
+    <div class="side-head">
+      <input class="search" id="imgSearch" placeholder="Filter images…" autocomplete="off">
+    </div>
+    <div class="img-list" id="imgList"></div>
+    <div class="side-foot" id="listFoot"></div>
+  </aside>
+
+  <!-- ============================== VIEWER -->
+  <main class="viewer" id="viewer">
+    <div class="viewer-top">
+      <button class="icon-btn" id="btnPrev" title="Previous image (Page Up)"><i data-i="left"></i></button>
+      <div class="img-title"><div id="imgName">No image</div><div class="sub" id="imgSub"></div></div>
+      <button class="icon-btn" id="btnNext" title="Next image (Page Down)"><i data-i="right"></i></button>
+      <div class="grow"></div>
+      <label class="toggle reviewed" title="Mark this image as checked"><input type="checkbox" id="chkReviewed"><span></span>Reviewed</label>
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+    <div class="empty" id="empty">
+      <div class="empty-card">
+        <div class="empty-art"><span></span><span></span><span></span></div>
+        <h2>Measure organoids in three steps</h2>
+        <ol>
+          <li><b>Open</b> a folder of images, or drop image files here.</li>
+          <li><b>Detect</b> the organoids (Cellpose), then fix anything wrong.</li>
+          <li><b>Calibrate</b> the scale and <b>export</b> one CSV per image.</li>
+        </ol>
+        <div class="row center">
+          <button class="btn primary lg" id="btnEmptyOpen"><i data-i="folder"></i>Open folder</button>
+          <button class="btn lg" id="btnEmptyFiles"><i data-i="plus"></i>Choose files</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- tools -->
+    <div class="toolbar" id="toolbar">
+      <button data-tool="select" title="Select / move (V)&#10;Click an organoid to select, Shift+click to add, Shift+drag for a box. Drag empty space to pan."><i data-i="cursor"></i><kbd>V</kbd></button>
+      <button data-tool="pan" title="Pan (H, or hold Space, or drag with the right/middle button)"><i data-i="hand"></i><kbd>H</kbd></button>
+      <div class="sep"></div>
+      <button data-tool="ellipse" title="Add organoid: drag a box around it (C). Hold Shift for a perfect circle."><i data-i="circle"></i><kbd>C</kbd></button>
+      <button data-tool="polygon" title="Add organoid: trace its outline (P). Click points or hold and drag; Enter / double-click / click the first point to finish."><i data-i="lasso"></i><kbd>P</kbd></button>
+      <button data-tool="brush" title="Brush (B): paint to grow the organoid you start on, or paint a new one. [ and ] change size."><i data-i="brush"></i><kbd>B</kbd></button>
+      <button data-tool="erase" title="Eraser (E): remove pixels from the organoid you start on. [ and ] change size."><i data-i="eraser"></i><kbd>E</kbd></button>
+      <button data-tool="split" title="Split (S): draw a line across fused organoids to cut them apart."><i data-i="scissors"></i><kbd>S</kbd></button>
+      <div class="sep"></div>
+      <button data-tool="ruler" title="Measure / calibrate (R): draw a line on a ruler or scale bar."><i data-i="ruler"></i><kbd>R</kbd></button>
+      <button data-tool="roi" title="Analysis region (O): outline the area to analyse (e.g. the well). Detection ignores objects outside."><i data-i="roi"></i><kbd>O</kbd></button>
+      <div class="sep"></div>
+      <button id="btnUndo" title="Undo (Ctrl+Z)"><i data-i="undo"></i></button>
+      <button id="btnRedo" title="Redo (Ctrl+Shift+Z)"><i data-i="redo"></i></button>
+    </div>
+
+    <div class="brush-size" id="brushSize" hidden>
+      <span>Size</span><input type="range" id="brushR" min="1" max="200" value="12"><b id="brushRVal">12 px</b>
+    </div>
+
+    <div class="tool-hint" id="toolHint"></div>
+
+    <!-- floating selection actions -->
+    <div class="sel-bar" id="selBar" hidden>
+      <span class="sel-count" id="selCount"></span>
+      <button class="btn sm" data-act="include" title="Include (I)"><i data-i="check"></i>Include</button>
+      <div class="menu-wrap">
+        <button class="btn sm warn" id="btnExcludeMenu" title="Exclude (X)"><i data-i="ban"></i>Exclude ▾</button>
+        <div class="menu" id="excludeMenu"></div>
+      </div>
+      <button class="btn sm" data-act="split2" title="Split into 2 (2)"><i data-i="split"></i>Split 2</button>
+      <button class="btn sm" data-act="split3" title="Split into 3 (3)">3</button>
+      <button class="btn sm" data-act="merge" title="Merge selected (M)"><i data-i="merge"></i>Merge</button>
+      <button class="btn sm danger" data-act="delete" title="Delete (Del)"><i data-i="trash"></i></button>
+      <button class="icon-btn sm" data-act="deselect" title="Clear selection (Esc)"><i data-i="x"></i></button>
+    </div>
+
+    <div class="view-ctrl">
+      <div class="layers">
+        <button class="icon-btn sm" id="btnLayers" title="Overlay options"><i data-i="layers"></i></button>
+        <div class="pop" id="layersPop">
+          <label class="toggle"><input type="checkbox" id="optOutline" checked><span></span>Outlines</label>
+          <label class="toggle"><input type="checkbox" id="optFill" checked><span></span>Fill</label>
+          <label class="toggle"><input type="checkbox" id="optNumbers" checked><span></span>Numbers</label>
+          <label class="toggle"><input type="checkbox" id="optExcluded" checked><span></span>Show excluded</label>
+          <label class="slider-row">Opacity <input type="range" id="optOpacity" min="0" max="100" value="55"></label>
+          <label class="slider-row">Brightness <input type="range" id="optBright" min="50" max="200" value="100"></label>
+          <label class="slider-row">Contrast <input type="range" id="optContrast" min="50" max="250" value="100"></label>
+        </div>
+      </div>
+      <button class="icon-btn sm" id="btnZoomOut" title="Zoom out (−)"><i data-i="minus"></i></button>
+      <button class="zoom-val" id="zoomVal" title="Click: actual pixels (1)">100%</button>
+      <button class="icon-btn sm" id="btnZoomIn" title="Zoom in (+)"><i data-i="plus"></i></button>
+      <button class="icon-btn sm" id="btnFit" title="Fit image (F)"><i data-i="fit"></i></button>
+    </div>
+    <canvas id="minimap" title="Overview - click to jump"></canvas>
+    <div class="drop" id="drop"><div>Drop images to add them</div></div>
+  </main>
+
+  <!-- ============================== RIGHT PANEL -->
+  <aside class="sidebar right" id="right">
+    <nav class="tabs" id="tabs">
+      <button data-tab="detect" class="on"><i data-i="sparkle"></i>Detect</button>
+      <button data-tab="calib"><i data-i="ruler"></i>Scale<span class="dot" id="calDot"></span></button>
+      <button data-tab="objects"><i data-i="list"></i>Organoids<span class="badge" id="objBadge">0</span></button>
+      <button data-tab="export"><i data-i="download"></i>Export</button>
+    </nav>
+
+    <!-- DETECT -->
+    <section class="tab-body" data-tab="detect">
+      <div class="card">
+        <div class="seg" id="method">
+          <button data-v="cellpose" class="on">Cellpose AI</button>
+          <button data-v="threshold">Threshold (no AI)</button>
+        </div>
+        <div class="status-line" id="cpStatus"></div>
+      </div>
+
+      <div class="card">
+        <h4>Expected organoid size</h4>
+        <label class="toggle"><input type="checkbox" id="diamAuto" checked><span></span>Estimate automatically</label>
+        <div class="row" id="diamRow">
+          <input type="number" id="diamVal" min="1" step="any" placeholder="diameter">
+          <select id="diamUnit"><option value="um">µm</option><option value="px">px</option></select>
+        </div>
+        <p class="hint">Typical diameter of one organoid. Set it if detections are cut in pieces or merged.</p>
+        <label class="toggle"><input type="checkbox" id="invert"><span></span>Invert image (try when dark organoids are missed)</label>
+      </div>
+
+      <details class="card" id="advCellpose">
+        <summary>Cellpose settings</summary>
+        <label class="field">Model
+          <select id="cpModel">
+            <option value="auto">Default for installed version (cpsam / cyto3)</option>
+            <option value="cpsam">cpsam (Cellpose 4)</option>
+            <option value="cyto3">cyto3 (Cellpose 3)</option>
+            <option value="cyto2">cyto2 (Cellpose 2/3)</option>
+            <option value="custom">Custom trained model…</option>
+          </select></label>
+        <input id="cpCustom" placeholder="/path/to/my_model" hidden>
+        <label class="field">Flow threshold <b id="flowVal">0.4</b>
+          <input type="range" id="flow" min="0" max="3" step="0.05" value="0.4"></label>
+        <p class="hint">Higher = more (and less regular) shapes accepted.</p>
+        <label class="field">Cell probability threshold <b id="probVal">0</b>
+          <input type="range" id="prob" min="-6" max="6" step="0.25" value="0"></label>
+        <p class="hint">Lower = larger outlines and more detections; higher = tighter and fewer.</p>
+        <label class="field">Downscale images larger than
+          <select id="maxSide"><option value="0">never</option><option value="1024">1024 px</option>
+            <option value="2048" selected>2048 px</option><option value="4096">4096 px</option></select></label>
+        <label class="toggle"><input type="checkbox" id="useGpu" checked><span></span>Use GPU if available</label>
+      </details>
+
+      <details class="card" id="advThreshold" hidden>
+        <summary>Threshold settings</summary>
+        <label class="field">Organoids are
+          <select id="polarity"><option value="auto">detect automatically</option><option value="dark">darker than background</option><option value="bright">brighter than background</option></select></label>
+        <label class="field">Smoothing <b id="smoothVal">2</b> px
+          <input type="range" id="smooth" min="0" max="10" step="0.5" value="2"></label>
+        <label class="toggle"><input type="checkbox" id="splitTouching" checked><span></span>Split touching organoids (watershed)</label>
+      </details>
+
+      <details class="card" open>
+        <summary>Keep only</summary>
+        <div class="row tight">
+          <label class="field">Min diameter<input type="number" id="minD" min="0" step="any" placeholder="none"></label>
+          <label class="field">Max diameter<input type="number" id="maxD" min="0" step="any" placeholder="none"></label>
+          <label class="field narrow">Unit<select id="filtUnit"><option value="px">px</option><option value="um">µm</option></select></label>
+        </div>
+        <label class="field">Min circularity <b id="circVal">0</b>
+          <input type="range" id="minCirc" min="0" max="0.95" step="0.05" value="0"></label>
+        <label class="toggle"><input type="checkbox" id="autoWells"><span></span>Only inside wells (find bright round wells automatically)</label>
+        <label class="toggle"><input type="checkbox" id="exclBorder"><span></span>Mark organoids cut by the image edge as excluded</label>
+        <div class="row">
+          <button class="btn sm" id="btnRoi"><i data-i="roi"></i>Draw analysis region</button>
+          <button class="btn sm ghost" id="btnRoiClear">Clear region</button>
+        </div>
+        <p class="hint">The region (e.g. the inside of a well) hides labels, text and debris outside it.</p>
+      </details>
+
+      <div class="actions sticky">
+        <button class="btn primary lg block" id="btnDetect"><i data-i="sparkle"></i>Detect in this image</button>
+        <div class="row">
+          <button class="btn block" id="btnDetectAll2">Detect in all images</button>
+        </div>
+        <label class="toggle small"><input type="checkbox" id="onlyNew" checked><span></span>Skip images already done</label>
+      </div>
+      <details class="card log"><summary>Detection log</summary><pre id="log"></pre></details>
+    </section>
+
+    <!-- CALIBRATE -->
+    <section class="tab-body" data-tab="calib" hidden>
+      <div class="card cal-now" id="calNow"></div>
+
+      <details class="card" open id="calEnter">
+        <summary><i data-i="keyboard"></i>I know the pixel size</summary>
+        <div class="row">
+          <input type="number" id="psVal" step="any" min="0" placeholder="e.g. 1.6">
+          <select id="psUnit">
+            <option value="um/px">µm per pixel</option>
+            <option value="nm/px">nm per pixel</option>
+            <option value="px/um">pixels per µm</option>
+            <option value="px/mm">pixels per mm</option>
+            <option value="dpi">DPI (scanner)</option>
+          </select>
+        </div>
+        <div class="row">
+          <button class="btn sm primary" data-apply="ps:this">Apply to this image</button>
+          <button class="btn sm" data-apply="ps:all">Apply to all images</button>
+        </div>
+        <p class="hint">Objective-specific values are in the microscope software (e.g. “pixel size” or “scale”). Binning and camera changes alter it.</p>
+      </details>
+
+      <details class="card" id="calMeta">
+        <summary><i data-i="file"></i>From the image file</summary>
+        <div id="metaBody"></div>
+      </details>
+
+      <details class="card" id="calLineCard">
+        <summary><i data-i="ruler"></i>Draw on a ruler / known object</summary>
+        <ol class="steps">
+          <li><button class="btn sm" id="btnDrawLine"><i data-i="ruler"></i>Draw line</button> along the ruler, scale bar or any object of known size (zoom in for the ends; drag the end handles to adjust).</li>
+          <li>Measured: <b id="lineLen">—</b></li>
+          <li>Real length:
+            <div class="row"><input type="number" id="lineReal" step="any" min="0" placeholder="e.g. 5">
+              <select id="lineUnit"><option>mm</option><option>µm</option><option>cm</option><option>inch</option></select></div></li>
+        </ol>
+        <div class="row">
+          <button class="btn sm primary" data-apply="line:this">Apply to this image</button>
+          <button class="btn sm" data-apply="line:all">Apply to all images</button>
+        </div>
+      </details>
+
+      <details class="card" id="calBarCard">
+        <summary><i data-i="sparkle"></i>Find the scale bar automatically</summary>
+        <button class="btn sm" id="btnFindBar">Find scale bars</button>
+        <div id="barList" class="cand-list"></div>
+        <p class="hint">Click a candidate, type the length printed next to it under “Draw on a ruler” and apply. Candidates are only suggestions: check the highlighted bar.</p>
+      </details>
+
+      <details class="card" id="calTickCard">
+        <summary><i data-i="ticks"></i>Graduated ruler (count ticks)</summary>
+        <p class="hint">Most precise for a ruler scanned with the plate: averages over many tick marks.</p>
+        <ol class="steps">
+          <li><button class="btn sm" id="btnDrawTicks"><i data-i="ruler"></i>Draw line</button> along the ruler, across many ticks.</li>
+          <li>Tick spacing: <div class="row"><input type="number" id="tickSpacing" value="1" step="any" min="0">
+            <select id="tickUnit"><option>mm</option><option>µm</option><option>cm</option><option value="inch">inch</option></select></div></li>
+        </ol>
+        <div id="tickResult" class="status-line"></div>
+        <canvas id="tickSpark" height="40"></canvas>
+        <div class="row">
+          <button class="btn sm primary" data-apply="tick:this" disabled>Apply to this image</button>
+          <button class="btn sm" data-apply="tick:all" disabled>Apply to all images</button>
+        </div>
+      </details>
+
+      <details class="card" id="calPresetCard">
+        <summary><i data-i="star"></i>Saved calibrations</summary>
+        <div id="presetList"></div>
+        <div class="row">
+          <input id="presetName" placeholder="Name, e.g. Scanner 1200 dpi">
+          <button class="btn sm" id="btnSavePreset">Save current</button>
+        </div>
+      </details>
+
+      <div class="card">
+        <label class="toggle"><input type="checkbox" id="trustDpi"><span></span>Trust DPI tags in files automatically (flatbed scanners)</label>
+        <button class="btn sm ghost" id="btnCalClear">Remove calibration from this image</button>
+      </div>
+    </section>
+
+    <!-- OBJECTS -->
+    <section class="tab-body" data-tab="objects" hidden>
+      <div class="stats" id="stats"></div>
+      <div class="card">
+        <div class="row wrap">
+          <button class="btn sm" id="btnNextFlag" title="Jump to the next organoid flagged as possibly fused (N)"><i data-i="flag"></i>Next flagged</button>
+          <button class="btn sm" id="btnExclFlag">Exclude all flagged</button>
+          <button class="btn sm" id="btnExclEdge">Exclude edge-cut</button>
+          <button class="btn sm danger ghost" id="btnClearAll"><i data-i="trash"></i>Clear all</button>
+        </div>
+      </div>
+      <div class="seg small" id="objFilter">
+        <button data-v="all" class="on">All</button><button data-v="included">Included</button>
+        <button data-v="excluded">Excluded</button><button data-v="flagged">Flagged</button>
+      </div>
+      <div class="table-wrap">
+        <table class="obj-table" id="objTable">
+          <thead><tr><th data-k="number">#</th><th data-k="eq_diam_px">Diameter</th><th data-k="area_px">Area</th>
+            <th data-k="circularity" title="4π·area/perimeter² (1 = perfect circle)">Circ.</th><th data-k="status">Status</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- EXPORT -->
+    <section class="tab-body" data-tab="export" hidden>
+      <div class="card">
+        <h4>Output folder</h4>
+        <div class="path" id="outDir">—</div>
+        <button class="btn sm ghost" id="btnReveal"><i data-i="folder"></i>Show in file manager</button>
+      </div>
+      <div class="card">
+        <label class="toggle"><input type="checkbox" id="expOverlay" checked><span></span>Annotated overlay image (PNG)</label>
+        <label class="toggle"><input type="checkbox" id="expMask" checked><span></span>Label mask (16-bit TIFF, opens in Fiji)</label>
+      </div>
+      <div class="actions">
+        <button class="btn primary lg block" id="btnExportThis"><i data-i="download"></i>Export this image</button>
+        <button class="btn block" id="btnExportAll2">Export all images</button>
+        <button class="btn ghost block" id="btnDownloadCsv">Download this image's CSV</button>
+      </div>
+      <div class="card" id="exportResult" hidden></div>
+      <div class="card hint-card">
+        <h4>What is written</h4>
+        <ul class="hint">
+          <li><code>&lt;image&gt;_organoids.csv</code> – one row per organoid (numbers match the overlay): status, reason, area, equivalent diameter, Feret, ellipse axes, circularity, solidity, sphere / ellipsoid volume, pixel size and its source.</li>
+          <li><code>all_organoids.csv</code> – every organoid of every image.</li>
+          <li><code>summary_per_image.csv</code> – counts and mean / SD / median diameter (included only).</li>
+          <li><code>export_info.json</code> – settings and calibration used, for your records.</li>
+        </ul>
+      </div>
+    </section>
+  </aside>
+
+  <footer class="statusbar">
+    <span id="sbPos">—</span>
+    <span id="sbCal">—</span>
+    <span id="sbSel"></span>
+    <span class="grow"></span>
+    <span id="sbHint">Tip: press ? for shortcuts</span>
+  </footer>
+</div>
+
+<!-- ============================== MODALS -->
+<div class="modal" id="folderModal" hidden>
+  <div class="modal-card wide">
+    <header><h3>Open a folder of images</h3><button class="icon-btn" data-close><i data-i="x"></i></button></header>
+    <div class="row">
+      <button class="icon-btn" id="fmUp" title="Up"><i data-i="up"></i></button>
+      <button class="icon-btn" id="fmHome" title="Home"><i data-i="home"></i></button>
+      <input id="fmPath" class="grow" spellcheck="false">
+      <button class="btn sm" id="fmGo">Go</button>
+    </div>
+    <div class="recent" id="fmRecent"></div>
+    <div class="fm-list" id="fmList"></div>
+    <div class="fm-info" id="fmInfo"></div>
+    <label class="toggle small"><input type="checkbox" id="fmRecursive"><span></span>Include sub-folders</label>
+    <label class="field">Save results to <input id="fmOut" placeholder="(default) <folder>/organoid_results" spellcheck="false"></label>
+    <footer><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="fmOpen">Open this folder</button></footer>
+  </div>
+</div>
+
+<div class="modal" id="helpModal" hidden>
+  <div class="modal-card wide">
+    <header><h3>How to use Organoid Sizer</h3><button class="icon-btn" data-close><i data-i="x"></i></button></header>
+    <div class="help-grid">
+      <div>
+        <h4>Workflow</h4>
+        <ol>
+          <li><b>Open folder</b> (top bar) or drag images in.</li>
+          <li><b>Scale tab</b>: microscope files are calibrated from their metadata automatically. Otherwise type the pixel size, or draw a line on the ruler / scale bar and type its length. “Apply to all images” for a batch from the same scanner.</li>
+          <li><b>Detect tab</b>: <i>Detect in this image</i>. If organoids are missed or split, set the expected diameter and try again.</li>
+          <li><b>Fix</b>: click an organoid and press <kbd>Del</kbd> (wrong), <kbd>X</kbd> (exclude, e.g. touching / fused), <kbd>2</kbd> (split a fused pair). Add missed ones with the circle <kbd>C</kbd> or outline <kbd>P</kbd> tool.</li>
+          <li>Tick <b>Reviewed</b>, go to the next image (<kbd>PgDn</kbd>).</li>
+          <li><b>Export all</b>: one CSV per image + summaries.</li>
+        </ol>
+        <h4>Excluded vs. deleted</h4>
+        <p>Delete removes a false detection. Exclude keeps the organoid in the CSV with status “excluded” and the reason (touching, fused, out of focus…), but leaves it out of the summaries – so the decision is documented.</p>
+      </div>
+      <div>
+        <h4>Keyboard</h4>
+        <table class="keys">
+          <tr><td><kbd>V</kbd> <kbd>H</kbd></td><td>Select / pan tool</td></tr>
+          <tr><td><kbd>Space</kbd>+drag, right-drag</td><td>Pan with any tool</td></tr>
+          <tr><td>Wheel, <kbd>+</kbd> <kbd>−</kbd></td><td>Zoom (at cursor)</td></tr>
+          <tr><td><kbd>F</kbd> / <kbd>1</kbd></td><td>Fit / actual pixels</td></tr>
+          <tr><td><kbd>C</kbd> <kbd>P</kbd></td><td>Add circle / outline</td></tr>
+          <tr><td><kbd>B</kbd> <kbd>E</kbd>, <kbd>[</kbd> <kbd>]</kbd></td><td>Brush / eraser, size</td></tr>
+          <tr><td><kbd>S</kbd></td><td>Split with a line</td></tr>
+          <tr><td><kbd>R</kbd> <kbd>O</kbd></td><td>Ruler / analysis region</td></tr>
+          <tr><td><kbd>Del</kbd></td><td>Delete selected</td></tr>
+          <tr><td><kbd>X</kbd> / <kbd>I</kbd></td><td>Exclude / include</td></tr>
+          <tr><td><kbd>2</kbd> <kbd>3</kbd> / <kbd>M</kbd></td><td>Split in 2 or 3 / merge</td></tr>
+          <tr><td><kbd>N</kbd></td><td>Next flagged organoid</td></tr>
+          <tr><td><kbd>Tab</kbd></td><td>Hide / show overlay</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / +<kbd>Shift</kbd></td><td>Undo / redo</td></tr>
+          <tr><td><kbd>PgUp</kbd> <kbd>PgDn</kbd></td><td>Previous / next image</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>A</kbd>, <kbd>Esc</kbd></td><td>Select all / cancel</td></tr>
+        </table>
+        <h4>Colours</h4>
+        <p><span class="sw inc"></span>included &nbsp; <span class="sw exc"></span>excluded &nbsp; <span class="sw sel"></span>selected &nbsp; <span class="sw flag"></span>“?” possibly fused (low solidity)</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="settingsModal" hidden>
+  <div class="modal-card">
+    <header><h3>Display settings</h3><button class="icon-btn" data-close><i data-i="x"></i></button></header>
+    <label class="field">Interface size <b id="uiScaleVal">100%</b>
+      <input type="range" id="uiScale" min="75" max="200" step="5" value="100"></label>
+    <p class="hint">For 4K / high-resolution or very small screens. Also works with the browser zoom (Ctrl + / Ctrl −).</p>
+    <div class="seg" id="themeSeg"><button data-v="auto" class="on">Auto</button><button data-v="dark">Dark</button><button data-v="light">Light</button></div>
+    <label class="field">Outline thickness <b id="lwVal">2</b> px
+      <input type="range" id="lineW" min="1" max="6" step="0.5" value="2"></label>
+  </div>
+</div>
+
+<div class="ctx" id="ctx" hidden></div>
+<div class="toasts" id="toasts"></div>
+<script src="app.js"></script>
+</body>
+</html>
