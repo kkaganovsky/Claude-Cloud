@@ -2,21 +2,33 @@
 
 Automatic segmentation of transplanted organoid grafts on T2-weighted rat MRI (nnU-Net), in one desktop app:
 **segment new scans → review and correct them → keep the corrected ones → retrain**. Every output is a
-3D Slicer `.seg.nrrd` named after the animal (`PA_01_R2M.seg.nrrd`). Runs on Linux with or without an NVIDIA GPU.
+3D Slicer `.seg.nrrd` named after the animal (`PA_01_R2M.seg.nrrd`).
 
-![Review page](docs/img/review.png)
+Runs on **Linux, Windows and macOS**, with an NVIDIA GPU (CUDA), an Apple-silicon GPU (MPS), or on CPU. It works on
+any monitor: sharp at high DPI (4K, Retina, fractional scaling), and laid out to fit down to about 1024×640.
+
+![Review page, dark theme](docs/img/D1600_review.png)
 
 ## Install (once)
 
-```bash
-cd mri-graftseg
-bash install.sh
-```
+| System | How |
+|---|---|
+| Linux | `bash install.sh` |
+| macOS | `bash install.sh` (Terminal) |
+| Windows | double-click `install.bat` (needs Python 3.10+ from python.org, with "Add to PATH" ticked) |
 
 - If nnU-Net already works in your Python (it does on the machine you trained on), GraftSeg is installed there and
   your PyTorch/CUDA setup is not touched.
-- Otherwise it makes `~/graftseg-env`, installs a PyTorch build that matches your NVIDIA driver, and adds GraftSeg to the
-  app menu. `graftseg doctor` shows what it found (paths, GPU, packages, models).
+- Otherwise it creates `~/graftseg-env` and installs a PyTorch that fits the computer: the CUDA build matching the
+  NVIDIA driver, the standard build on macOS (uses the Apple GPU), or CPU only.
+- It also adds a launcher: the app menu on Linux, `GraftSeg.bat` on the Windows desktop, `GraftSeg.command` on the
+  macOS desktop. `graftseg doctor` shows what it found (paths, GPU, packages, models).
+
+| Hardware | Segmenting new scans | Training |
+|---|---|---|
+| NVIDIA GPU (Linux / Windows) | fast | yes (RTX A6000: the model in use was trained on one) |
+| Apple silicon (MPS) | yes | possible, slow |
+| CPU only | yes, slower (use *Fast mode*) | not practical |
 
 ## First run
 
@@ -36,7 +48,7 @@ graftseg
    best EMA Dice, normalization, source path, date) and becomes the default. **Save a copy as…** writes it to any folder
    under any name (USB stick, another computer). **Folder…** in *Add weights* reads such a copy back in.
 
-![Models page](docs/img/models.png)
+![Models page](docs/img/D1600_models.png)
 
 ## Daily use
 
@@ -51,6 +63,21 @@ Naming: the cage and ear tag come from the DICOM *SeriesDescription*, otherwise 
 (`PA05_R2M`, `PA_05-R2M` and `PA05 R2M` all become `PA_05_R2M`). If no cage/ear tag can be found, the folder name is
 used, so no scan is skipped. A segmentation a person made is never overwritten: the prediction is saved as
 `…_pred.seg.nrrd` instead, and its Dice against the person's version goes in the summary CSV.
+
+## Look and screens
+
+- **Theme**: Settings → Appearance → *Follow system* (default) / Light / Dark. *Follow system* switches live
+  when the OS switches.
+- **Interface size**: scaling comes from the monitor automatically. If text looks too small or too large, pick
+  85–200 % under Settings → Appearance (applies after *Restart now*).
+- **Small windows / laptops**: below about 1180 px wide the sidebar shrinks to icons. In Review, the case list hides
+  itself (the **Cases** button brings it back), the toolbar wraps, and the side panels can be dragged wider or
+  narrower; the editor remembers those widths.
+- The window reopens where it was. If that monitor is gone, it re-centres on the current screen.
+
+| Light, 1600 px | Laptop, 1024 × 640 | Dark, 2× (HiDPI) |
+|---|---|---|
+| ![](docs/img/L1600_home.png) | ![](docs/img/L1024_review.png) | ![](docs/img/D2x_home.png) |
 
 ## The retraining loop
 
@@ -91,7 +118,8 @@ graftseg repair-old "/path/to/folders"   # fixes .seg.nrrd written by the old pr
   nnUNet_preprocessed/           nnU-Net's preprocessed copies (can be deleted and rebuilt)
   nnUNet_results/                raw training output: all checkpoints, logs, progress.png
   models/<name>/                 registered models: MODEL_CARD.json, plans.json, dataset.json, fold_N/checkpoint_*.pth
-~/.config/graftseg/config.json   the settings (workspace, default model, device)
+settings file                    Linux ~/.config/graftseg/config.json · macOS ~/Library/Application Support/graftseg/
+                                 Windows %APPDATA%\graftseg\config.json   (workspace, default model, device)
 ```
 
 ## Read before relying on it
@@ -110,6 +138,8 @@ graftseg repair-old "/path/to/folders"   # fixes .seg.nrrd written by the old pr
   Whether your PA files contain extra segments, layers or cropped boxes is not known yet. `graftseg scan <folder>`
   lists them. `generate_splits.py` dropped a case when one animal had two scans with the same timepoint, and treated
   `Assembloid03_L1F` and `Assembloid_03_L1F` as different animals. `graftseg build` handles all of these.
+- Tested here on Linux only: Windows and macOS support (paths, launchers, the Stop button, Apple GPU) is written to
+  their conventions but has not been run on those systems yet.
 - Tested here on synthetic Slicer-format data: build, preprocess, 1-epoch CPU training, register, predict from DICOM and
   NRRD, edit, save. That includes an oblique multi-frame DICOM, checked against the old converter's geometry. **Not yet
   tested on your real scans or opened in 3D Slicer itself**: please open one `PA_xx.nrrd` + `.seg.nrrd` pair in Slicer

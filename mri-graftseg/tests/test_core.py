@@ -180,3 +180,25 @@ def test_folder_fallback_and_series_choice(tmp_path):
     sc = find_scans([tmp_path])
     assert len(sc) == 1 and sc[0].path.name == "EnIm1.dcm"
     assert sc[0].name_source == "folder-fallback" and sc[0].name == "Pasca_FebMar26_Pasca_03-13-2026_E7_P1"
+
+
+def test_stop_file_stops_a_running_job(tmp_path, monkeypatch):
+    """The app's Stop button works on every OS by creating GRAFTSEG_STOP_FILE; the job must end within seconds."""
+    import threading
+    import time
+    from graftseg import train as TR
+    stop = tmp_path / "stop"
+    monkeypatch.setenv("GRAFTSEG_STOP_FILE", str(stop))
+    cmd = [sys.executable, "-c", "import time\nfor i in range(600):\n    print(i, flush=True); time.sleep(0.1)"]
+    threading.Timer(1.0, stop.touch).start()
+    t0 = time.time()
+    with pytest.raises(KeyboardInterrupt):
+        TR._run(cmd, dict(__import__("os").environ), None, log=lambda s: None)
+    assert time.time() - t0 < 10
+
+
+def test_nnunet_entry_points_resolve():
+    import importlib
+    from graftseg.train import _ENTRY
+    for mod, fn in _ENTRY.values():
+        assert callable(getattr(importlib.import_module(mod), fn))

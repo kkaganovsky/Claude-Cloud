@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# GraftSeg installer for Linux (NVIDIA GPU optional).
+# GraftSeg installer for Linux and macOS (NVIDIA GPU optional; Apple-silicon GPU used automatically).
+# Windows: run install.bat instead.
 #
 #   bash install.sh            # install into the Python you run it with if nnU-Net already works there,
 #                              # otherwise into a new environment at ~/graftseg-env
@@ -23,7 +24,10 @@ else
     "$PY" -m pip install --upgrade pip wheel
     # Pick a PyTorch build that the installed NVIDIA driver supports (driver's max CUDA version from nvidia-smi).
     TORCH_INDEX=""
-    if command -v nvidia-smi >/dev/null 2>&1; then
+    if [[ "$(uname)" == "Darwin" ]]; then
+        say "macOS: installing PyPI PyTorch (uses the Apple-silicon GPU via MPS when available)"
+        "$PY" -m pip install torch
+    elif command -v nvidia-smi >/dev/null 2>&1; then
         CUDA_MAX=$(nvidia-smi | sed -n 's/.*CUDA Version: *\([0-9]*\)\.\([0-9]*\).*/\1\2/p' | head -1)
         say "NVIDIA driver supports CUDA up to ${CUDA_MAX:0:2}.${CUDA_MAX:2}"
         for v in 128 126 124 121 118; do
@@ -43,8 +47,8 @@ else
     say "Linked graftseg into ~/.local/bin (make sure it is on your PATH)"
 fi
 
-# Qt needs a few system libraries on minimal installs; tell the user if they are missing.
-"$PY" -c "import PySide6.QtWidgets" 2>/dev/null || cat <<'EOF'
+# Qt needs a few system libraries on minimal Linux installs; tell the user if they are missing.
+[[ "$(uname)" == "Darwin" ]] || "$PY" -c "import PySide6.QtWidgets" 2>/dev/null || cat <<'EOF'
 
 Qt could not start. Install its system libraries, then run graftseg again:
     sudo apt install libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 libfontconfig1 libdbus-1-3

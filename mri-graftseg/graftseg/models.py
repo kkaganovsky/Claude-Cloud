@@ -78,8 +78,8 @@ def register(cfg: Config, source: Path, name: str, checkpoint: str = "checkpoint
             if f not in avail:
                 raise FileNotFoundError(f"{base}/fold_{f}/{checkpoint} not found (available folds: {avail})")
             ckpts[f] = base / f"fold_{f}" / checkpoint
-        plans_json = json.loads((base / "plans.json").read_text())
-        dataset_json = json.loads((base / "dataset.json").read_text())
+        plans_json = json.loads((base / "plans.json").read_text(encoding="utf-8"))
+        dataset_json = json.loads((base / "dataset.json").read_text(encoding="utf-8"))
         for cand in (base / "training_manifest.csv", cfg.raw / base.parent.name / "manifest.csv"):
             if cand.exists():
                 manifest = cand
@@ -120,7 +120,7 @@ def list_models(cfg: Config) -> list[dict]:
     for d in sorted(cfg.models.iterdir()):
         card = d / "MODEL_CARD.json"
         if card.exists():
-            c = json.loads(card.read_text())
+            c = json.loads(card.read_text(encoding="utf-8"))
             c["path"] = str(d)
             c["default"] = d.name == cfg.default_model
             out.append(c)
@@ -140,7 +140,7 @@ def resolve(cfg: Config, name_or_path: Optional[str]) -> tuple[Path, dict]:
         if not d.exists():
             known = ", ".join(m["name"] for m in list_models(cfg)) or "none"
             raise FileNotFoundError(f"Model '{name}' not found in {cfg.models} (registered: {known})")
-    card = json.loads((d / "MODEL_CARD.json").read_text()) if (d / "MODEL_CARD.json").exists() else {}
+    card = json.loads((d / "MODEL_CARD.json").read_text(encoding="utf-8")) if (d / "MODEL_CARD.json").exists() else {}
     if "checkpoint" not in card:
         ck = sorted(d.glob("fold_*/*.pth"))
         if not ck:

@@ -1,6 +1,7 @@
 """One settings file so nobody has to remember paths or export nnUNet_* variables.
 
-Location: ``~/.config/graftseg/config.json`` (override with the GRAFTSEG_CONFIG environment variable).
+Location: ``~/.config/graftseg/config.json`` on Linux, ``~/Library/Application Support/graftseg`` on macOS,
+``%APPDATA%\\graftseg`` on Windows (override with the GRAFTSEG_CONFIG environment variable).
 Everything lives under one *workspace* folder:
 
     <workspace>/nnUNet_raw            training datasets (images + labels, NIfTI)
@@ -16,7 +17,20 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Optional
 
-CONFIG_PATH = Path(os.environ.get("GRAFTSEG_CONFIG", Path.home() / ".config" / "graftseg" / "config.json"))
+def _default_config_path() -> Path:
+    """Per-OS settings location: Linux ~/.config/graftseg, macOS ~/Library/Application Support/graftseg,
+    Windows %APPDATA%\\graftseg."""
+    import sys
+    if sys.platform.startswith("win"):
+        base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    return base / "graftseg" / "config.json"
+
+
+CONFIG_PATH = Path(os.environ.get("GRAFTSEG_CONFIG", _default_config_path()))
 
 
 @dataclass
@@ -27,7 +41,7 @@ class Config:
     nnunet_results: str = ""
     models_dir: str = ""
     default_model: str = ""
-    device: str = "auto"          # auto | cuda | cpu
+    device: str = "auto"          # auto | cuda | mps (Apple silicon) | cpu
     extra: dict = field(default_factory=dict)
 
     # -- derived paths -------------------------------------------------------------------------------
@@ -72,7 +86,7 @@ class Config:
 
 def load(path: Path = CONFIG_PATH) -> Config:
     if path.exists():
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
         known = {k: v for k, v in data.items() if k in Config.__dataclass_fields__}
         return Config(**known)
     cfg = Config()
@@ -91,6 +105,10 @@ def resolve_device(cfg: Optional[Config] = None, requested: Optional[str] = None
         return want
     try:
         import torch
-        return "cuda" if torch.cuda.is_available() else "cpu"
+        if torch.cuda.is_available():
+            return "cuda"
+        if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+            return "mps"
+        return "cpu"
     except Exception:
         return "cpu"

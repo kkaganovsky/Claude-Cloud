@@ -26,64 +26,11 @@ from . import models as M
 Qt = QtCore.Qt
 pg.setConfigOptions(imageAxisOrder="row-major", antialias=True)
 
-# ---------------------------------------------------------------------------------------------------------------
-# Look
-ACCENT, ACCENT_DARK, ACCENT_SOFT = "#4f46e5", "#4338ca", "#eef2ff"
-GOOD, WARN, BAD = "#16a34a", "#d97706", "#dc2626"
-BG, CARD, LINE, TEXT, MUTED = "#f5f7fb", "#ffffff", "#e4e7ee", "#111827", "#6b7280"
-SIDEBAR, SIDEBAR_TEXT = "#0f172a", "#cbd5e1"
+from .ui_kit import BAD, GOOD, INFO, WARN, FlowLayout, ResponsiveGrid, T, Toast, apply_theme, fit_to_screen, icon
 
-QSS = f"""
-* {{ font-family: "Inter", "Segoe UI", "Noto Sans", "Ubuntu", "Helvetica Neue", Arial, sans-serif; font-size: 10pt; }}
-QMainWindow, QDialog {{ background: {BG}; }}
-QWidget {{ color: {TEXT}; }}
-QWidget#content {{ background: {BG}; }}
-QToolTip {{ background: #111827; color: white; border: none; padding: 6px 8px; border-radius: 6px; }}
-QListWidget#nav {{ background: {SIDEBAR}; border: none; padding: 10px 8px; outline: 0; }}
-QListWidget#nav::item {{ color: {SIDEBAR_TEXT}; padding: 11px 14px; margin: 2px 0; border-radius: 9px; }}
-QListWidget#nav::item:hover {{ background: #1e293b; color: white; }}
-QListWidget#nav::item:selected {{ background: {ACCENT}; color: white; font-weight: 600; }}
-QLabel#brand {{ background: {SIDEBAR}; color: white; font-size: 15pt; font-weight: 700; padding: 18px 18px 6px 18px; }}
-QLabel#brandsub {{ background: {SIDEBAR}; color: #64748b; padding: 0 18px 14px 18px; font-size: 9pt; }}
-QLabel#h1 {{ font-size: 18pt; font-weight: 700; color: {TEXT}; }}
-QLabel#sub {{ color: {MUTED}; }}
-QLabel#cardtitle {{ color: {MUTED}; font-size: 9pt; font-weight: 600; letter-spacing: 0.5px; }}
-QLabel#big {{ font-size: 14pt; font-weight: 600; }}
-QFrame#card {{ background: {CARD}; border: 1px solid {LINE}; border-radius: 14px; }}
-QFrame#banner {{ background: {ACCENT_SOFT}; border: 1px solid #c7d2fe; border-radius: 12px; }}
-QPushButton {{ background: {CARD}; border: 1px solid {LINE}; border-radius: 9px; padding: 8px 14px; }}
-QPushButton:hover {{ border-color: {ACCENT}; background: {ACCENT_SOFT}; }}
-QPushButton:pressed {{ background: #e0e7ff; }}
-QPushButton:disabled {{ color: #9ca3af; background: #f3f4f6; }}
-QPushButton:checked {{ background: {ACCENT}; color: white; border-color: {ACCENT_DARK}; }}
-QPushButton[role="primary"] {{ background: {ACCENT}; color: white; border: 1px solid {ACCENT_DARK}; font-weight: 600; }}
-QPushButton[role="primary"]:hover {{ background: {ACCENT_DARK}; }}
-QPushButton[role="primary"]:disabled {{ background: #a5b4fc; border-color: #a5b4fc; }}
-QPushButton[role="danger"] {{ color: {BAD}; }}
-QPushButton[role="danger"]:hover {{ background: #fef2f2; border-color: {BAD}; }}
-QLineEdit, QPlainTextEdit, QTextEdit, QAbstractSpinBox, QComboBox {{
-    background: {CARD}; border: 1px solid {LINE}; border-radius: 8px; padding: 6px 8px; selection-background-color: {ACCENT}; }}
-QAbstractSpinBox::up-button, QAbstractSpinBox::down-button {{ width: 0; border: none; }}
-QLineEdit:focus, QAbstractSpinBox:focus, QComboBox:focus, QPlainTextEdit:focus {{ border: 1px solid {ACCENT}; }}
-QComboBox::drop-down {{ border: none; width: 22px; }}
-QComboBox QAbstractItemView {{ background: {CARD}; border: 1px solid {LINE}; selection-background-color: {ACCENT_SOFT}; selection-color: {ACCENT_DARK}; }}
-QPlainTextEdit#log {{ background: #0b1020; color: #d1d5db; font-family: "JetBrains Mono", "DejaVu Sans Mono", monospace; font-size: 9pt; border-radius: 10px; border: none; padding: 8px; }}
-QTableWidget, QListWidget {{ background: {CARD}; alternate-background-color: #f9fafb; border: 1px solid {LINE}; border-radius: 10px;
-    gridline-color: #f1f2f6; selection-background-color: {ACCENT_SOFT}; selection-color: {ACCENT_DARK}; outline: 0; }}
-QListWidget#cases::item {{ padding: 7px 8px; border-radius: 6px; }}
-QHeaderView::section {{ background: #f9fafb; color: {MUTED}; border: none; border-bottom: 1px solid {LINE}; padding: 7px 8px; font-weight: 600; }}
-QProgressBar {{ background: #e5e7eb; border: none; border-radius: 5px; height: 10px; text-align: center; font-size: 8pt; }}
-QProgressBar::chunk {{ background: {ACCENT}; border-radius: 5px; }}
-QSlider::groove:horizontal {{ height: 5px; background: #e5e7eb; border-radius: 2px; }}
-QSlider::sub-page:horizontal {{ background: {ACCENT}; border-radius: 2px; }}
-QSlider::handle:horizontal {{ background: white; border: 2px solid {ACCENT}; width: 14px; height: 14px; margin: -6px 0; border-radius: 9px; }}
-QCheckBox {{ spacing: 8px; }}
-QScrollArea {{ background: transparent; border: none; }}
-QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px; }}
-QScrollBar::handle:vertical {{ background: #cbd5e1; border-radius: 4px; min-height: 30px; }}
-QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
-QStatusBar {{ background: {CARD}; color: {MUTED}; border-top: 1px solid {LINE}; }}
-"""
+
+def muted() -> str:
+    return T["muted"]
 
 
 def card(title: str = "") -> tuple[QtWidgets.QFrame, QtWidgets.QVBoxLayout]:
@@ -92,7 +39,7 @@ def card(title: str = "") -> tuple[QtWidgets.QFrame, QtWidgets.QVBoxLayout]:
     if title:
         t = QtWidgets.QLabel(title.upper()); t.setObjectName("cardtitle"); lay.addWidget(t)
     sh = QtWidgets.QGraphicsDropShadowEffect(blurRadius=18, xOffset=0, yOffset=2)
-    sh.setColor(QtGui.QColor(15, 23, 42, 18)); f.setGraphicsEffect(sh)
+    sh.setColor(QtGui.QColor(0, 0, 0, T.get("shadow", 18))); f.setGraphicsEffect(sh)
     return f, lay
 
 
@@ -227,7 +174,9 @@ class Runner(QtWidgets.QWidget):
         self.log.appendPlainText(f"$ graftseg {shown}\n")
         self.proc = QtCore.QProcess(self)
         env = QtCore.QProcessEnvironment.systemEnvironment()
-        env.insert("PYTHONUNBUFFERED", "1")
+        env.insert("PYTHONUNBUFFERED", "1"); env.insert("PYTHONIOENCODING", "utf-8")
+        fd, self.stop_file = tempfile.mkstemp(prefix="graftseg_stop_"); os.close(fd); os.remove(self.stop_file)
+        env.insert("GRAFTSEG_STOP_FILE", self.stop_file)
         self.proc.setProcessEnvironment(env)
         self.proc.setProcessChannelMode(QtCore.QProcess.MergedChannels)
         self.proc.readyReadStandardOutput.connect(self._read)
@@ -255,6 +204,10 @@ class Runner(QtWidgets.QWidget):
                     pass
 
     def _done(self, code, _status):
+        try:
+            os.remove(self.stop_file)
+        except OSError:
+            pass
         if self._partial.strip():
             self.out.append(self._partial); self.log.appendPlainText(self._partial)
         self.stop_btn.setEnabled(False); self.bar.setVisible(False)
@@ -262,9 +215,18 @@ class Runner(QtWidgets.QWidget):
         self.finished.emit(code, "\n".join(self.out))
 
     def stop(self):
-        if self.busy:
-            os.kill(int(self.proc.processId()), signal.SIGINT)
-            self.state.setText("Stopping (finishing the current step)…")
+        """Stop cleanly on every OS: a stop file the job checks (between scans / every second during training),
+        plus Ctrl+C on Linux/macOS."""
+        if not self.busy:
+            return
+        Path(self.stop_file).touch()
+        if os.name != "nt":
+            try:
+                os.kill(int(self.proc.processId()), signal.SIGINT)
+            except OSError:
+                pass
+        self.state.setText("Stopping…")
+        QtCore.QTimer.singleShot(180000, lambda: self.proc.kill() if self.busy else None)  # last resort
 
 
 class Worker(QtCore.QThread):
@@ -299,6 +261,7 @@ class Page(QtWidgets.QScrollArea):
         self.setWidgetResizable(True)
         inner = QtWidgets.QWidget(); inner.setObjectName("content")
         self.lay = QtWidgets.QVBoxLayout(inner); self.lay.setContentsMargins(28, 24, 28, 24); self.lay.setSpacing(16)
+        self.lay.setAlignment(Qt.AlignTop)
         self.setWidget(inner)
 
     def refresh(self):
@@ -309,51 +272,71 @@ class HomePage(Page):
     def __init__(self, app):
         super().__init__(app)
         self.lay.addWidget(header("Welcome", "Segment organoid grafts on T2 MRI, check them, and keep the model up to date."))
-        self.banner = QtWidgets.QFrame(); self.banner.setObjectName("banner")
-        bl = QtWidgets.QHBoxLayout(self.banner); bl.setContentsMargins(16, 12, 16, 12)
-        self.banner_text = QtWidgets.QLabel(); self.banner_text.setWordWrap(True); bl.addWidget(self.banner_text, 1)
-        self.banner_btn = button("Open Settings", "primary"); bl.addWidget(self.banner_btn)
-        self.banner_btn.clicked.connect(lambda: app.go("Settings"))
-        self.lay.addWidget(self.banner)
-        grid = QtWidgets.QGridLayout(); grid.setSpacing(16); self.lay.addLayout(grid)
+        # first-run checklist
+        self.setup_card, sl = card("Get started")
+        self.steps = []
+        for key, title, desc, page, btn in [
+                ("ws", "Choose the workspace", "The folder that holds nnUNet_raw / nnUNet_results (e.g. …/MRI NeuralNetwork).", "Settings", "Open Settings"),
+                ("model", "Add your trained weights", "Point to checkpoint_best.pth, give it a name. Copied into the models folder.", "Models", "Add weights"),
+                ("go", "Segment a folder", "Pick a folder of DICOM / NRRD scans and review the results.", "Segment", "Segment")]:
+            row = QtWidgets.QHBoxLayout(); row.setSpacing(12)
+            badge = QtWidgets.QLabel(); badge.setFixedSize(26, 26); badge.setAlignment(Qt.AlignCenter)
+            txt = QtWidgets.QLabel(); txt.setWordWrap(True)
+            b = button(btn); b.clicked.connect(lambda _=0, p=page, k=key: (self.app.go(p), k == "model" and self.app.models.add()))
+            row.addWidget(badge); row.addWidget(txt, 1); row.addWidget(b)
+            sl.addLayout(row)
+            self.steps.append((key, badge, txt, title, desc, b))
+        self.lay.addWidget(self.setup_card)
+        grid = ResponsiveGrid(280)
         c1, l1 = card("Workspace"); self.ws = QtWidgets.QLabel(); self.ws.setWordWrap(True); l1.addWidget(self.ws)
-        c2, l2 = card("GPU"); self.gpu = QtWidgets.QLabel("Checking…"); self.gpu.setWordWrap(True); l2.addWidget(self.gpu)
+        c2, l2 = card("Compute"); self.gpu = QtWidgets.QLabel("Checking…"); self.gpu.setWordWrap(True); l2.addWidget(self.gpu)
         c3, l3 = card("Default model"); self.model = QtWidgets.QLabel(); self.model.setWordWrap(True); l3.addWidget(self.model)
         mb = button("Manage models"); mb.clicked.connect(lambda: app.go("Models")); l3.addWidget(mb, 0, Qt.AlignLeft)
-        for i, (c, l) in enumerate(((c1, l1), (c2, l2), (c3, l3))):
-            l.addStretch(); grid.addWidget(c, 0, i)
-        c4, l4 = card("What do you want to do?")
-        steps = [("1  Segment new scans", "Pick a folder of DICOM/NRRD scans. Each gets PA_01_R2M.seg.nrrd next to it.", "Segment"),
-                 ("2  Review and correct", "Paint / erase the graft, save. Reviewed files can be used for training.", "Review"),
-                 ("3  Retrain", "Build a dataset from labeled folders and train on the GPU.", "Train")]
-        for t, d, page in steps:
-            row = QtWidgets.QHBoxLayout()
-            txt = QtWidgets.QLabel(f"<b>{t}</b><br><span style='color:{MUTED}'>{d}</span>"); txt.setWordWrap(True)
-            row.addWidget(txt, 1)
-            b = button(f"Go to {page}", "primary" if page == "Segment" else ""); b.clicked.connect(lambda _=0, p=page: app.go(p))
-            row.addWidget(b); l4.addLayout(row)
-        self.lay.addWidget(c4)
+        for c, l in ((c1, l1), (c2, l2), (c3, l3)):
+            l.setAlignment(Qt.AlignTop); grid.add(c)
+        self.lay.addWidget(grid)
+        grid2 = ResponsiveGrid(260)
+        for ic, t, d, page, role in [("segment", "Segment new scans", "Each scan gets <b>PA_01_R2M.seg.nrrd</b> next to it.", "Segment", "primary"),
+                                     ("review", "Review and correct", "Paint / erase, adjust contrast, save as reviewed.", "Review", ""),
+                                     ("train", "Retrain", "Turn reviewed folders into a dataset and train on the GPU.", "Train", "")]:
+            c, l = card()
+            head = QtWidgets.QHBoxLayout(); lab = QtWidgets.QLabel(); lab.setPixmap(icon(ic, T["accent"], 28).pixmap(28, 28))
+            head.addWidget(lab); tt = QtWidgets.QLabel(f"<b style='font-size:12pt'>{t}</b>"); head.addWidget(tt, 1); l.addLayout(head)
+            dd = QtWidgets.QLabel(d); dd.setObjectName("sub"); dd.setWordWrap(True); l.addWidget(dd)
+            b = button(f"Open {page}", role); b.clicked.connect(lambda _=0, p=page: app.go(p)); l.addWidget(b, 0, Qt.AlignLeft)
+            grid2.add(c)
+        self.lay.addWidget(grid2)
         self.lay.addStretch()
         self._w = Worker(gpu_info); self._w.done.connect(lambda r, e: self.gpu.setText(r or str(e))); self._w.start()
 
     def refresh(self):
         cfg = self.app.cfg
-        configured = C.CONFIG_PATH.exists()
-        self.banner.setVisible(not configured)
-        self.banner_text.setText("<b>First time here?</b> Choose the workspace folder (where nnUNet_raw / "
-                                 "nnUNet_results live, e.g. <i>/media/pasca/Extreme SSD/MRI NeuralNetwork</i>).")
+        ws_ok = C.CONFIG_PATH.exists() and bool(cfg.workspace or cfg.nnunet_results)
         try:
-            self.ws.setText(f"<b>{cfg.workspace or cfg.results.parent}</b><br><span style='color:{MUTED}'>models: {cfg.models}</span>")
+            self.ws.setText(f"<b>{cfg.workspace or cfg.results.parent}</b><br><span style='color:{muted()}'>models: {cfg.models}</span>")
         except RuntimeError:
-            self.ws.setText("<span style='color:#dc2626'>Not set</span>")
+            self.ws.setText(f"<span style='color:{BAD}'>Not set yet</span>")
+        model_ok = False
         try:
             d, cd = M.resolve(cfg, None)
-            dice = cd.get("best_ema_pseudo_dice")
+            model_ok = True
             self.model.setText(f"<span style='font-size:13pt;font-weight:600'>{cd.get('name', d.name)}</span><br>"
-                               f"<span style='color:{MUTED}'>epoch {cd.get('epoch')} · EMA Dice {dice} · "
+                               f"<span style='color:{muted()}'>epoch {cd.get('epoch')} · EMA Dice {cd.get('best_ema_pseudo_dice')} · "
                                f"{cd.get('checkpoint')} · folds {cd.get('folds')}</span>")
         except Exception:
             self.model.setText(f"<span style='color:{WARN}'>No model yet.</span> Add your trained weights on the Models page.")
+        done = {"ws": ws_ok, "model": model_ok, "go": bool(settings().value("segment/ran", False, type=bool))}
+        for key, badge, txt, title, desc, b in self.steps:
+            ok = done[key]
+            if ok:
+                badge.setPixmap(icon("check", "white", 18).pixmap(18, 18))
+                badge.setStyleSheet(f"background:{GOOD}; border-radius:13px;")
+            else:
+                badge.setPixmap(QtGui.QPixmap()); badge.setText(str([s[0] for s in self.steps].index(key) + 1))
+                badge.setStyleSheet(f"background:{T['accent_soft']}; color:{T['accent']}; border-radius:13px; font-weight:700;")
+            txt.setText(f"<b>{title}</b><br><span style='color:{muted()}'>{desc}</span>")
+            b.setProperty("role", "" if ok else "primary"); b.style().unpolish(b); b.style().polish(b)
+        self.setup_card.setVisible(not all(done.values()))
 
 
 class SegmentPage(Page):
@@ -368,7 +351,8 @@ class SegmentPage(Page):
         c, l = card("Options")
         form = QtWidgets.QFormLayout(); form.setHorizontalSpacing(18); l.addLayout(form)
         self.model = QtWidgets.QComboBox(); form.addRow("Model", self.model)
-        self.device = QtWidgets.QComboBox(); self.device.addItems(["auto", "cuda", "cpu"]); self.device.setFixedWidth(160)
+        self.device = QtWidgets.QComboBox(); self.device.addItems(["auto", "cuda", "mps", "cpu"]); self.device.setFixedWidth(160)
+        self.device.setToolTip("auto = NVIDIA GPU if present, else Apple-silicon GPU (mps), else CPU")
         form.addRow("Device", self.device)
         self.fast = QtWidgets.QCheckBox("Fast mode (no mirroring augmentation, ~8× faster, slightly less accurate)")
         self.overwrite = QtWidgets.QCheckBox("Redo scans that already have a prediction (reviewed files are kept unless this is ticked)")
@@ -381,8 +365,20 @@ class SegmentPage(Page):
         row.addWidget(self.preview); row.addWidget(self.run); row.addStretch()
         self.lay.addWidget(c)
         c, l = card("Progress")
-        self.runner = Runner(); self.runner.setMinimumHeight(260); l.addWidget(self.runner)
+        self.runner = Runner(); self.runner.setMinimumHeight(220); l.addWidget(self.runner)
         self.lay.addWidget(c, 1)
+        self.res_card, l = card("Results")
+        self.results = QtWidgets.QTableWidget(0, 6)
+        self.results.setHorizontalHeaderLabels(["Animal", "Graft (mm³)", "Pieces", "Check", "Status", "File"])
+        self.results.verticalHeader().setVisible(False); self.results.setAlternatingRowColors(True)
+        self.results.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self.results.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.results.horizontalHeader().setStretchLastSection(True); self.results.setMinimumHeight(180)
+        self.results.doubleClicked.connect(self._open_row)
+        hint = QtWidgets.QLabel("Double-click a row to open it in Review."); hint.setObjectName("sub")
+        l.addWidget(self.results); l.addWidget(hint)
+        self.res_card.setVisible(False)
+        self.lay.addWidget(self.res_card)
         self.preview.clicked.connect(lambda: self._go(dry=True))
         self.run.clicked.connect(lambda: self._go(dry=False))
         self.runner.finished.connect(self._finished)
@@ -424,18 +420,50 @@ class SegmentPage(Page):
         self.runner.start(args, "Finding scans" if dry else "Segmenting")
 
     def _finished(self, code: int, out: str):
-        if self._dry or code != 0:
+        if self._dry:
             return
-        segs = []
+        rows = []
         for ln in out.splitlines():
             if ln.startswith("Summary: "):
                 try:
-                    with open(ln[len("Summary: "):].strip()) as f:
-                        segs = [r["seg_nrrd"] for r in csv.DictReader(f) if r.get("seg_nrrd")]
+                    with open(ln[len("Summary: "):].strip(), encoding="utf-8") as f:
+                        rows = list(csv.DictReader(f))
                 except OSError:
                     pass
+        if code != 0 and not rows:
+            self.app.status("Segmentation stopped or failed — see the log.", "error")
+            return
+        settings().setValue("segment/ran", True)
+        self._rows = rows
+        self.results.setRowCount(len(rows))
+        for i, r in enumerate(rows):
+            vals = [r["name"], r["graft_mm3"], r["components"], r["qc"] or ("ok" if r["status"] == "predicted" else ""),
+                    r["status"], r["seg_nrrd"] or r["input"]]
+            for j, v in enumerate(vals):
+                it = QtWidgets.QTableWidgetItem(str(v))
+                if j == 3 and r["qc"]:
+                    it.setForeground(QtGui.QColor(WARN))
+                if j == 4 and r["status"].startswith("failed"):
+                    it.setForeground(QtGui.QColor(BAD))
+                self.results.setItem(i, j, it)
+        self.results.resizeColumnsToContents()
+        self.res_card.setVisible(bool(rows))
+        n_ok = sum(r["status"] == "predicted" for r in rows)
+        flagged = sum(bool(r["qc"]) for r in rows)
+        self.app.status(f"Segmented {n_ok} scan(s)" + (f", {flagged} flagged for a closer look" if flagged else ""),
+                        "warn" if flagged else "ok")
+        self.app.home.refresh()
+        segs = [r["seg_nrrd"] for r in rows if r.get("seg_nrrd")]
         if segs and self.review_after.isChecked():
             self.app.review.load_paths(segs)
+            self.app.go("Review")
+
+    def _open_row(self, index):
+        r = self._rows[index.row()] if index.row() < len(getattr(self, "_rows", [])) else None
+        if r and r.get("seg_nrrd"):
+            segs = [x["seg_nrrd"] for x in self._rows if x.get("seg_nrrd")]
+            self.app.review.load_paths(segs)
+            self.app.review.select_path(r["seg_nrrd"])
             self.app.go("Review")
 
 
@@ -483,11 +511,12 @@ class ReviewPage(QtWidgets.QWidget):
         self.slice = 0
         self.paint_mode = True
         self._last = None
-        outer = QtWidgets.QHBoxLayout(self); outer.setContentsMargins(16, 16, 16, 16); outer.setSpacing(12)
+        outer = QtWidgets.QHBoxLayout(self); outer.setContentsMargins(12, 12, 12, 12); outer.setSpacing(0)
+        self.split = QtWidgets.QSplitter(Qt.Horizontal); self.split.setHandleWidth(10); outer.addWidget(self.split)
 
         # left: case list
         left, ll = card("Cases")
-        left.setMaximumWidth(300); left.setMinimumWidth(230)
+        left.setMinimumWidth(190); self.left = left
         ob = button("Folder…", tip="Load every .seg.nrrd under a folder"); ob.clicked.connect(self.open_folder)
         of = button("Files…"); of.clicked.connect(self.open_files)
         r = QtWidgets.QHBoxLayout(); r.addWidget(ob); r.addWidget(of); ll.addLayout(r)
@@ -496,11 +525,14 @@ class ReviewPage(QtWidgets.QWidget):
         self.list = QtWidgets.QListWidget(); self.list.setObjectName("cases")
         self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff); self.list.setTextElideMode(Qt.ElideMiddle)
         self.list.currentRowChanged.connect(self._row_changed); ll.addWidget(self.list, 1)
-        outer.addWidget(left)
+        self.split.addWidget(left)
 
         # center: viewer
-        mid = QtWidgets.QVBoxLayout(); outer.addLayout(mid, 1)
-        tools = QtWidgets.QHBoxLayout(); mid.addLayout(tools)
+        center = QtWidgets.QWidget(); mid = QtWidgets.QVBoxLayout(center); mid.setContentsMargins(6, 0, 6, 0); mid.setSpacing(8)
+        self.split.addWidget(center)
+        toolw = QtWidgets.QWidget(); tools = FlowLayout(toolw, spacing=8); mid.addWidget(toolw)
+        self.b_cases = button("Cases", "ghost", "Show / hide the case list"); self.b_cases.setCheckable(True); self.b_cases.setChecked(True)
+        self.b_cases.toggled.connect(lambda on: self.left.setVisible(on)); tools.addWidget(self.b_cases)
         self.btn_paint = button("Paint  (P)"); self.btn_erase = button("Erase  (E)")
         for b in (self.btn_paint, self.btn_erase):
             b.setCheckable(True)
@@ -508,22 +540,24 @@ class ReviewPage(QtWidgets.QWidget):
         grp = QtWidgets.QButtonGroup(self); grp.setExclusive(True); grp.addButton(self.btn_paint); grp.addButton(self.btn_erase)
         self.btn_paint.toggled.connect(lambda on: setattr(self, "paint_mode", on))
         tools.addWidget(self.btn_paint); tools.addWidget(self.btn_erase)
-        tools.addWidget(QtWidgets.QLabel("  Brush"))
-        self.brush = QtWidgets.QSlider(Qt.Horizontal); self.brush.setRange(1, 30); self.brush.setValue(4); self.brush.setFixedWidth(120)
-        self.brush_lbl = QtWidgets.QLabel("4 px"); self.brush.valueChanged.connect(lambda v: (self.brush_lbl.setText(f"{v} px"), self._cursor_update()))
-        tools.addWidget(self.brush); tools.addWidget(self.brush_lbl)
+        bw = QtWidgets.QWidget(); bl = QtWidgets.QHBoxLayout(bw); bl.setContentsMargins(4, 0, 4, 0)
+        bl.addWidget(QtWidgets.QLabel("Brush"))
+        self.brush = QtWidgets.QSlider(Qt.Horizontal); self.brush.setRange(1, 30); self.brush.setValue(4); self.brush.setFixedWidth(110)
+        self.brush_lbl = QtWidgets.QLabel("4 px"); self.brush_lbl.setMinimumWidth(36)
+        self.brush.valueChanged.connect(lambda v: (self.brush_lbl.setText(f"{v} px"), self._cursor_update()))
+        bl.addWidget(self.brush); bl.addWidget(self.brush_lbl); tools.addWidget(bw)
         self.ball = QtWidgets.QCheckBox("3D brush"); self.ball.setToolTip("Paint a ball that reaches the neighbouring slices (key 3)")
         tools.addWidget(self.ball)
-        tools.addWidget(QtWidgets.QLabel("  Overlay"))
-        self.opacity = QtWidgets.QSlider(Qt.Horizontal); self.opacity.setRange(0, 100); self.opacity.setValue(45); self.opacity.setFixedWidth(100)
-        self.opacity.valueChanged.connect(lambda v: self.ov.setOpacity(v / 100)); tools.addWidget(self.opacity)
-        tools.addStretch()
+        ow = QtWidgets.QWidget(); ol = QtWidgets.QHBoxLayout(ow); ol.setContentsMargins(4, 0, 4, 0)
+        ol.addWidget(QtWidgets.QLabel("Overlay"))
+        self.opacity = QtWidgets.QSlider(Qt.Horizontal); self.opacity.setRange(0, 100); self.opacity.setValue(45); self.opacity.setFixedWidth(90)
+        self.opacity.valueChanged.connect(lambda v: self.ov.setOpacity(v / 100)); ol.addWidget(self.opacity); tools.addWidget(ow)
         self.view_btns = []
         for k, name in enumerate(("Acquired plane", "Plane 2", "Plane 3")):
             b = button(name); b.setCheckable(True); b.clicked.connect(lambda _=0, k=k: self.set_axis_order(k))
             self.view_btns.append(b); tools.addWidget(b)
 
-        self.glw = pg.GraphicsLayoutWidget(); self.glw.setBackground("#05070d")
+        self.glw = pg.GraphicsLayoutWidget(); self.glw.setBackground(T["viewer"]); self.glw.setMinimumSize(320, 260)
         self.vb = SliceView(self); self.glw.addItem(self.vb, 0, 0)
         self.img = pg.ImageItem(); self.ov = pg.ImageItem(); self.ov.setOpacity(0.45)
         self.vb.addItem(self.img); self.vb.addItem(self.ov)
@@ -543,7 +577,6 @@ class ReviewPage(QtWidgets.QWidget):
 
         # right: info + actions
         right, rl = card("This case")
-        right.setMaximumWidth(270); right.setMinimumWidth(230)
         self.info = QtWidgets.QLabel("Open a folder of segmentations, or run Segment first."); self.info.setWordWrap(True)
         self.info.setTextFormat(Qt.RichText); rl.addWidget(self.info)
         self.b_save = button("Save  (Ctrl+S)", "primary"); self.b_next = button("Save + next  (N)", "primary")
@@ -553,11 +586,19 @@ class ReviewPage(QtWidgets.QWidget):
         for b in (self.b_save, self.b_next, self.b_prev, self.b_undo, self.b_fill, self.b_jump, self.b_revert):
             rl.addWidget(b)
         help_ = QtWidgets.QLabel(
-            f"<span style='color:{MUTED}'><b>Mouse</b><br>left-drag: paint (or erase in Erase mode)<br>right-drag: erase<br>"
+            f"<span style='color:{muted()}'><b>Mouse</b><br>left-drag: paint (or erase in Erase mode)<br>right-drag: erase<br>"
             "wheel: slice · Ctrl+wheel: zoom<br>middle-drag: pan<br><b>Keys</b> ↑/↓ slice · [ ] brush · 3 3D brush<br>"
             "Contrast: drag the histogram bar.</span>")
         help_.setWordWrap(True); rl.addWidget(help_); rl.addStretch()
-        outer.addWidget(right)
+        rs = QtWidgets.QScrollArea(); rs.setWidgetResizable(True); rs.setWidget(right); rs.setMinimumWidth(220)
+        rs.setFrameShape(QtWidgets.QFrame.NoFrame); self.split.addWidget(rs)
+        self.split.setStretchFactor(0, 0); self.split.setStretchFactor(1, 1); self.split.setStretchFactor(2, 0)
+        self.split.setSizes([250, 900, 270])
+        st = settings().value("review/split")
+        if st is not None:
+            self.split.restoreState(st)
+        self.split.splitterMoved.connect(lambda *_: settings().setValue("review/split", self.split.saveState()))
+        self._auto_hidden = False
         self.b_save.clicked.connect(self.save); self.b_next.clicked.connect(self.save_next)
         self.b_prev.clicked.connect(lambda: self.goto(self.idx - 1)); self.b_undo.clicked.connect(self.undo)
         self.b_fill.clicked.connect(self.fill); self.b_jump.clicked.connect(self.jump); self.b_revert.clicked.connect(self.revert)
@@ -607,13 +648,13 @@ class ReviewPage(QtWidgets.QWidget):
         self.list.blockSignals(True)
         self.list.clear()
         self._shown = [p for p in self.paths if not self.only_pred.isChecked() or self._statuses.get(p) == "predicted"]
-        colors = {"predicted": WARN, "reviewed": GOOD, "human": "#2563eb"}
+        colors = {"predicted": WARN, "reviewed": GOOD, "human": INFO}
         for p in self._shown:
             st = self._statuses.get(p, "?")
             it = QtWidgets.QListWidgetItem(f"{Path(p).name[:-9]}\n{st}")
-            it.setForeground(QtGui.QColor(TEXT)); it.setToolTip(p)
+            it.setForeground(QtGui.QColor(T["text"])); it.setToolTip(p)
             it.setData(Qt.UserRole, p)
-            it.setIcon(self._dot(colors.get(st, MUTED)))
+            it.setIcon(self._dot(colors.get(st, muted())))
             self.list.addItem(it)
         self.list.blockSignals(False)
         if self._shown:
@@ -636,6 +677,18 @@ class ReviewPage(QtWidgets.QWidget):
             self.list.blockSignals(True); self.list.setCurrentRow(self._shown.index(str(self.case.seg_path))); self.list.blockSignals(False)
             return
         self.open_case(path)
+
+    def select_path(self, path: str):
+        if path in getattr(self, "_shown", []):
+            self.list.setCurrentRow(self._shown.index(path))
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        narrow = self.width() < 1050
+        if narrow and not self._auto_hidden and self.b_cases.isChecked():
+            self._auto_hidden = True; self.b_cases.setChecked(False)
+        elif not narrow and self._auto_hidden:
+            self._auto_hidden = False; self.b_cases.setChecked(True)
 
     def goto(self, i: int):
         if 0 <= i < len(self._shown):
@@ -727,13 +780,13 @@ class ReviewPage(QtWidgets.QWidget):
         n = c.mask.shape[self.axis]
         self.slice_lbl.setText(f"{self.slice + 1} / {n}")
         st = c.header.get("GraftSeg_Status", "human")
-        color = {"predicted": WARN, "reviewed": GOOD}.get(st, "#2563eb")
+        color = {"predicted": WARN, "reviewed": GOOD}.get(st, INFO)
         self.info.setText(
             f"<div style='font-size:13pt;font-weight:600'>{c.name}</div>"
-            f"<div style='color:{MUTED}'>case {self.idx + 1} of {len(self._shown)}</div><br>"
+            f"<div style='color:{muted()}'>case {self.idx + 1} of {len(self._shown)}</div><br>"
             f"{chip(st, color)} {chip('edited – not saved', BAD) if c.edited else ''}<br><br>"
             f"<b>Graft</b> {c.volume_mm3():.2f} mm³<br>"
-            f"<span style='color:{MUTED}'>{int(c.mask.sum())} voxels · voxel {' × '.join(f'{s:.3f}' for s in c.spacing_zyx[::-1])} mm<br>"
+            f"<span style='color:{muted()}'>{int(c.mask.sum())} voxels · voxel {' × '.join(f'{s:.3f}' for s in c.spacing_zyx[::-1])} mm<br>"
             f"MRI: {c.image_path.name}<br>model: {c.header.get('GraftSeg_Model', '–')}</span>")
 
     # -- painting ------------------------------------------------------------------------------------
@@ -797,7 +850,7 @@ class ReviewPage(QtWidgets.QWidget):
         if it:
             it.setText(f"{Path(p).name[:-9]}\nreviewed"); it.setIcon(self._dot(GOOD))
         self.redraw(image=False)
-        self.app.status(f"Saved {p}")
+        self.app.status(f"Saved {Path(p).name} (reviewed)", "ok")
 
     def save_next(self):
         if self.case is None:
@@ -968,7 +1021,7 @@ class ModelsPage(Page):
         if err:
             QtWidgets.QMessageBox.warning(self, "Could not add model", str(err)); self.app.status("")
             return
-        self.app.cfg = C.load(); self.app.status(f"Model saved in {res}"); self.app.refresh_all()
+        self.app.cfg = C.load(); self.app.status(f"Model saved in {res}", "ok"); self.app.refresh_all()
 
     def set_default(self):
         m = self._selected()
@@ -993,10 +1046,10 @@ class ModelsPage(Page):
         try:
             shutil.copytree(m["path"], dest, symlinks=False)
             cardp = dest / "MODEL_CARD.json"
-            cd = json.loads(cardp.read_text()); cd["name"] = name.strip(); cardp.write_text(json.dumps(cd, indent=2))
+            cd = json.loads(cardp.read_text(encoding="utf-8")); cd["name"] = name.strip(); cardp.write_text(json.dumps(cd, indent=2))
         finally:
             QtWidgets.QApplication.restoreOverrideCursor()
-        self.app.status(f"Copied to {dest}  (add it on another computer with “Add weights… → Folder…”)")
+        self.app.status(f"Copied to {dest} — on another computer use Add weights… → Folder…", "ok")
 
     def rename(self):
         m = self._selected()
@@ -1010,7 +1063,7 @@ class ModelsPage(Page):
         if new.exists():
             QtWidgets.QMessageBox.warning(self, "Exists", f"{new} already exists."); return
         Path(m["path"]).rename(new)
-        cd = json.loads((new / "MODEL_CARD.json").read_text()); cd["name"] = name
+        cd = json.loads((new / "MODEL_CARD.json").read_text(encoding="utf-8")); cd["name"] = name
         (new / "MODEL_CARD.json").write_text(json.dumps(cd, indent=2))
         if self.app.cfg.default_model == m["name"]:
             self.app.cfg.default_model = name; self.app.cfg.save()
@@ -1080,6 +1133,12 @@ class TrainPage(Page):
         for b in self.fold_boxes:
             frow.addWidget(b)
         frow.addStretch(); form.addRow("Folds", frow)
+        self.tdev = QtWidgets.QComboBox(); self.tdev.setFixedWidth(220)
+        for label, key in [("NVIDIA GPU (cuda)", "cuda"), ("Apple silicon GPU (mps, slow)", "mps"), ("CPU (very slow, testing only)", "cpu")]:
+            self.tdev.addItem(label, key)
+        if sys.platform == "darwin":
+            self.tdev.setCurrentIndex(1)
+        form.addRow("Device", self.tdev)
         self.reg_name = QtWidgets.QLineEdit(); self.reg_name.setPlaceholderText("e.g. graft_v2 — leave empty to register later on the Models page")
         form.addRow("Save model as", self.reg_name)
         self.restart = QtWidgets.QCheckBox("Start over (ignore existing checkpoints). Off = continue where it stopped.")
@@ -1088,7 +1147,7 @@ class TrainPage(Page):
         b_train = button("Start training", "primary"); b_train.clicked.connect(self.train); row.addWidget(b_train)
         b_stat = button("Refresh progress"); b_stat.clicked.connect(self.refresh_status); row.addWidget(b_stat)
         row.addStretch()
-        note = QtWidgets.QLabel(f"<span style='color:{MUTED}'>Stop is safe: nnU-Net saves a checkpoint every 50 epochs and "
+        note = QtWidgets.QLabel(f"<span style='color:{muted()}'>Stop is safe: nnU-Net saves a checkpoint every 50 epochs and "
                                 "checkpoint_best.pth whenever validation improves; Start again continues from there.</span>")
         note.setWordWrap(True); l.addWidget(note)
         self.status_tbl = QtWidgets.QTableWidget(0, 6)
@@ -1117,7 +1176,7 @@ class TrainPage(Page):
         for d in dss:
             try:
                 i = int(d.name[7:10]); ids.append(i)
-                n = json.loads((d / "dataset.json").read_text()).get("numTraining", "?") if (d / "dataset.json").exists() else "?"
+                n = json.loads((d / "dataset.json").read_text(encoding="utf-8")).get("numTraining", "?") if (d / "dataset.json").exists() else "?"
                 self.ds_pick.addItem(f"{d.name}  ({n} cases)", i)
             except ValueError:
                 pass
@@ -1157,7 +1216,8 @@ class TrainPage(Page):
         if not folds:
             QtWidgets.QMessageBox.information(self, "No folds", "Tick at least one fold."); return
         args = ["train", "--dataset", str(self.ds_pick.currentData()), "--folds", ",".join(folds),
-                "--epochs", str(self.epochs.currentData()), "--planner", self.planner.currentData()]
+                "--epochs", str(self.epochs.currentData()), "--planner", self.planner.currentData(),
+                "--device", self.tdev.currentData()]
         if self.reg_name.text().strip():
             args += ["--register-as", self.reg_name.text().strip()]
         if self.restart.isChecked():
@@ -1170,7 +1230,7 @@ class TrainPage(Page):
 
     def _finished(self, code, _out):
         if self._mode == "check" and code == 0 and self._report.exists():
-            with open(self._report) as f:
+            with open(self._report, encoding="utf-8") as f:
                 rows = list(csv.DictReader(f))
             self.table.setVisible(True); self.table.setRowCount(len(rows))
             for i, r in enumerate(rows):
@@ -1223,9 +1283,34 @@ class SettingsPage(Page):
             r = QtWidgets.QHBoxLayout(); r.addWidget(e, 1); r.addWidget(bb); form.addRow(label, r); self.fields[key] = e
         l.addWidget(self.adv_box); self.adv.toggled.connect(self.adv_box.setVisible); self.adv_box.setVisible(False)
         form2 = QtWidgets.QFormLayout(); l.addLayout(form2)
-        self.device = QtWidgets.QComboBox(); self.device.addItems(["auto", "cuda", "cpu"]); self.device.setFixedWidth(160)
+        self.device = QtWidgets.QComboBox(); self.device.addItems(["auto", "cuda", "mps", "cpu"]); self.device.setFixedWidth(160)
+        self.device.setToolTip("cuda = NVIDIA GPU · mps = Apple-silicon GPU · auto picks the best available")
         form2.addRow("Device", self.device)
         sv = button("Save settings", "primary"); sv.clicked.connect(self.save); l.addWidget(sv, 0, Qt.AlignLeft)
+        self.lay.addWidget(c)
+        c, l = card("Appearance")
+        form3 = QtWidgets.QFormLayout(); l.addLayout(form3)
+        self.theme = QtWidgets.QComboBox(); self.theme.setFixedWidth(220)
+        for label, key in [("Follow system", "system"), ("Light", "light"), ("Dark", "dark")]:
+            self.theme.addItem(label, key)
+        self.theme.setCurrentIndex(max(0, self.theme.findData(str(settings().value("ui/theme", "system")))))
+        self.theme.currentIndexChanged.connect(lambda _: (settings().setValue("ui/theme", self.theme.currentData()),
+                                                          self.app.set_theme(self.theme.currentData())))
+        form3.addRow("Theme", self.theme)
+        srow = QtWidgets.QHBoxLayout()
+        self.scale = QtWidgets.QComboBox(); self.scale.setFixedWidth(220)
+        for label, v in [("Automatic (from the monitor)", ""), ("Compact 85 %", "0.85"), ("100 %", "1"), ("115 %", "1.15"),
+                         ("125 %", "1.25"), ("150 %", "1.5"), ("175 %", "1.75"), ("200 %", "2")]:
+            self.scale.addItem(label, v)
+        self.scale.setCurrentIndex(max(0, self.scale.findData(str(settings().value("ui/scale", "")))))
+        self.scale.currentIndexChanged.connect(self._scale_changed)
+        self.restart_btn = button("Restart now", "primary"); self.restart_btn.setVisible(False)
+        self.restart_btn.clicked.connect(self._restart)
+        srow.addWidget(self.scale); srow.addWidget(self.restart_btn); srow.addStretch()
+        form3.addRow("Interface size", srow)
+        note = QtWidgets.QLabel("High-resolution monitors are scaled automatically. Use Interface size if text looks too "
+                                "small or too large (applies after a restart).")
+        note.setObjectName("sub"); note.setWordWrap(True); l.addWidget(note)
         self.lay.addWidget(c)
         c, l = card("Using nnU-Net commands in a terminal")
         self.env = QtWidgets.QPlainTextEdit(); self.env.setObjectName("log"); self.env.setReadOnly(True); self.env.setMaximumHeight(110)
@@ -1234,6 +1319,15 @@ class SettingsPage(Page):
         l.addWidget(cp, 0, Qt.AlignLeft)
         self.lay.addWidget(c)
         self.lay.addStretch()
+
+    def _scale_changed(self, _i):
+        settings().setValue("ui/scale", self.scale.currentData())
+        self.restart_btn.setVisible(True)
+
+    def _restart(self):
+        if not self.app.close():
+            return
+        QtCore.QProcess.startDetached(sys.executable, ["-m", "graftseg"])
 
     def _browse(self, edit: QtWidgets.QLineEdit):
         d = QtWidgets.QFileDialog.getExistingDirectory(self, "Choose folder", edit.text() or last_dir("settings"))
@@ -1264,30 +1358,37 @@ class SettingsPage(Page):
         except (RuntimeError, OSError) as e:
             QtWidgets.QMessageBox.warning(self, "Cannot use that folder", str(e)); return
         cfg.save()
-        self.app.status("Settings saved."); self.app.refresh_all()
+        self.app.status("Settings saved.", "ok"); self.app.refresh_all()
 
 
 # ---------------------------------------------------------------------------------------------------------------
 class MainWindow(QtWidgets.QMainWindow):
     PAGES = ["Home", "Segment", "Review", "Models", "Train", "Settings"]
+    ICONS = {"Home": "home", "Segment": "segment", "Review": "review", "Models": "models", "Train": "train",
+             "Settings": "settings"}
+    COMPACT_BELOW = 1180  # window width (logical px) below which the sidebar shows icons only
 
     def __init__(self):
         super().__init__()
         self.cfg = C.load()
         self.setWindowTitle("GraftSeg")
+        self.setMinimumSize(900, 580)
         central = QtWidgets.QWidget(); self.setCentralWidget(central)
         h = QtWidgets.QHBoxLayout(central); h.setContentsMargins(0, 0, 0, 0); h.setSpacing(0)
-        side = QtWidgets.QWidget(); side.setFixedWidth(210); side.setStyleSheet(f"background:{SIDEBAR};")
-        sl = QtWidgets.QVBoxLayout(side); sl.setContentsMargins(0, 0, 0, 0); sl.setSpacing(0)
-        b = QtWidgets.QLabel("GraftSeg"); b.setObjectName("brand"); sl.addWidget(b)
-        s = QtWidgets.QLabel("MRI graft segmentation"); s.setObjectName("brandsub"); sl.addWidget(s)
-        self.nav = QtWidgets.QListWidget(); self.nav.setObjectName("nav")
-        icons = {"Home": "⌂", "Segment": "◎", "Review": "✎", "Models": "▣", "Train": "↻", "Settings": "⚙"}
+        self.side = QtWidgets.QWidget(); self.side.setObjectName("sidebar"); self.side.setAttribute(Qt.WA_StyledBackground, True)
+        sl = QtWidgets.QVBoxLayout(self.side); sl.setContentsMargins(0, 14, 0, 10); sl.setSpacing(0)
+        self.brand = QtWidgets.QLabel("GraftSeg"); self.brand.setObjectName("brand"); self.brand.setContentsMargins(18, 4, 18, 0)
+        self.brand_sub = QtWidgets.QLabel("MRI graft segmentation"); self.brand_sub.setObjectName("brandsub")
+        self.brand_sub.setContentsMargins(18, 0, 18, 12)
+        sl.addWidget(self.brand); sl.addWidget(self.brand_sub)
+        self.nav = QtWidgets.QListWidget(); self.nav.setObjectName("nav"); self.nav.setIconSize(QtCore.QSize(20, 20))
+        self.nav.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff); self.nav.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         for p in self.PAGES:
-            self.nav.addItem(f"{icons[p]}   {p}")
+            it = QtWidgets.QListWidgetItem(icon(self.ICONS[p], "#cbd5e1"), f"  {p}"); it.setToolTip(p)
+            self.nav.addItem(it)
         sl.addWidget(self.nav, 1)
-        ver = QtWidgets.QLabel("v0.1"); ver.setStyleSheet("color:#475569;padding:12px 18px;"); sl.addWidget(ver)
-        h.addWidget(side)
+        self.ver = QtWidgets.QLabel("v0.2"); self.ver.setStyleSheet("color:#475569;padding:6px 18px;"); sl.addWidget(self.ver)
+        h.addWidget(self.side)
         self.stack = QtWidgets.QStackedWidget(); h.addWidget(self.stack, 1)
         self.home, self.segment, self.review = HomePage(self), SegmentPage(self), ReviewPage(self)
         self.models, self.trainp, self.settings_page = ModelsPage(self), TrainPage(self), SettingsPage(self)
@@ -1295,17 +1396,41 @@ class MainWindow(QtWidgets.QMainWindow):
         for p in self.pages:
             self.stack.addWidget(p)
         self.nav.currentRowChanged.connect(self._nav)
-        self.setStatusBar(QtWidgets.QStatusBar())
-        st = settings()
-        geo = st.value("window/geometry")
-        if geo is not None:
-            self.restoreGeometry(geo)
-        else:
-            scr = QtGui.QGuiApplication.primaryScreen().availableGeometry()
-            self.resize(min(1500, int(scr.width() * 0.9)), min(950, int(scr.height() * 0.9)))
+        self.toast = Toast(self)
+        self._compact = None
+        self._set_compact(False)
+        fit_to_screen(self, settings().value("window/geometry"))
         self.refresh_all()
-        self.nav.setCurrentRow(0 if C.CONFIG_PATH.exists() else self.PAGES.index("Settings"))
+        self.nav.setCurrentRow(0)
+        try:  # follow the OS light/dark switch while running
+            QtGui.QGuiApplication.styleHints().colorSchemeChanged.connect(lambda *_: self.set_theme(None))
+        except AttributeError:
+            pass
 
+    # -- layout --------------------------------------------------------------------------------------
+    def _set_compact(self, compact: bool):
+        if compact == self._compact:
+            return
+        self._compact = compact
+        self.side.setFixedWidth(72 if compact else 220)
+        self.brand.setText("GS" if compact else "GraftSeg")
+        self.brand_sub.setVisible(not compact)
+        for i, p in enumerate(self.PAGES):
+            self.nav.item(i).setText("" if compact else f"  {p}")
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._set_compact(self.width() < self.COMPACT_BELOW)
+        if self.toast.isVisible():
+            self.toast.reposition()
+
+    def set_theme(self, mode: Optional[str]):
+        mode = mode or str(settings().value("ui/theme", "system"))
+        apply_theme(QtWidgets.QApplication.instance(), mode)
+        self.review.glw.setBackground(T["viewer"])
+        self.refresh_all()
+
+    # -- navigation ----------------------------------------------------------------------------------
     def _nav(self, row: int):
         if self.stack.currentWidget() is self.review and row != 2 and not self.review.confirm_leave():
             self.nav.blockSignals(True); self.nav.setCurrentRow(2); self.nav.blockSignals(False); return
@@ -1315,8 +1440,9 @@ class MainWindow(QtWidgets.QMainWindow):
     def go(self, page: str):
         self.nav.setCurrentRow(self.PAGES.index(page))
 
-    def status(self, text: str):
-        self.statusBar().showMessage(text, 15000)
+    def status(self, text: str, kind: str = "info"):
+        if text:
+            self.toast.show_message(text, kind)
 
     def refresh_all(self):
         self.cfg = C.load()
@@ -1324,7 +1450,7 @@ class MainWindow(QtWidgets.QMainWindow):
             try:
                 p.refresh()
             except Exception as e:  # noqa: BLE001
-                self.status(f"{type(p).__name__}: {e}")
+                self.status(f"{type(p).__name__}: {e}", "error")
 
     def closeEvent(self, e):
         if not self.review.confirm_leave():
@@ -1342,16 +1468,27 @@ class MainWindow(QtWidgets.QMainWindow):
 
 
 def make_app() -> QtWidgets.QApplication:
-    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    app = QtWidgets.QApplication.instance()
+    if app is None:
+        scale = settings().value("ui/scale", "")
+        if scale and "QT_SCALE_FACTOR" not in os.environ:   # "Interface size" setting (applies at start-up)
+            os.environ["QT_SCALE_FACTOR"] = str(scale)
+        QtGui.QGuiApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+        app = QtWidgets.QApplication(sys.argv)
     app.setApplicationName("GraftSeg")
+    app.setApplicationDisplayName("GraftSeg")
+    app.setDesktopFileName("graftseg")
+    app.setWindowIcon(icon("segment", "#6366f1", 64))
     app.setStyle("Fusion")
-    app.setStyleSheet(QSS)
+    apply_theme(app, str(settings().value("ui/theme", "system")))
     return app
 
 
 def launch(page: str = "home", review_paths: Optional[list[str]] = None):
     app = make_app()
     w = MainWindow()
+    if not C.CONFIG_PATH.exists():
+        w.go("Home")
     if review_paths:
         w.review.load_paths(review_paths)
         w.go("Review")

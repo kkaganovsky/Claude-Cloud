@@ -119,7 +119,11 @@ def run(cfg: Config, inputs: list[Path], model: Optional[str] = None, device: Op
     seg_model = Segmenter(cfg, model, device, fast, checkpoint)
     log(f"Model '{seg_model.name}' ({seg_model.checkpoint}, folds {list(seg_model.folds)}) on {seg_model.device}")
     rows = []
+    stop_file = os.environ.get("GRAFTSEG_STOP_FILE")
     for i, s in enumerate(scans, 1):
+        if stop_file and Path(stop_file).exists():
+            log(f"Stopped by user after {i - 1} of {len(scans)} scans.")
+            break
         out = output_paths(s)
         row = {"name": s.name, "name_from": s.name_source, "input": str(s.path), "kind": s.kind,
                "series_description": s.series_description, "note": s.note, "seg_nrrd": "", "graft_voxels": "",
@@ -185,7 +189,7 @@ def run(cfg: Config, inputs: list[Path], model: Optional[str] = None, device: Op
         root = Path(inputs[0]) if Path(inputs[0]).is_dir() else Path(inputs[0]).parent
         summary_csv = root / f"graftseg_predictions_{datetime.now():%Y%m%d_%H%M%S}.csv"
     if rows and summary_csv:
-        with open(summary_csv, "w", newline="") as f:
+        with open(summary_csv, "w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
             w.writeheader()
             w.writerows(rows)

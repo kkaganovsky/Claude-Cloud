@@ -49,6 +49,8 @@ def cmd_doctor(a):
             for i in range(torch.cuda.device_count()):
                 p = torch.cuda.get_device_properties(i)
                 print(f"GPU {i}            {p.name}, {p.total_memory / 2**30:.0f} GB")
+        elif getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+            print("GPU              Apple silicon (MPS): prediction is accelerated; training is possible but slow")
         else:
             print("GPU              none visible to torch (prediction works on CPU, slowly; training needs a GPU)")
     except ImportError:
@@ -171,18 +173,35 @@ def cmd_gui(a):
 
 
 def cmd_desktop(a):
-    """Add a menu entry / desktop launcher (Linux)."""
+    """Add a launcher: Linux app menu + desktop, macOS/Windows desktop shortcut."""
     exe = Path(sys.executable)
-    entry = ("[Desktop Entry]\nType=Application\nName=GraftSeg\nComment=MRI graft segmentation\n"
-             f"Exec=\"{exe}\" -m graftseg\nTerminal=false\nCategories=Science;MedicalSoftware;\nIcon=applications-science\n")
-    targets = [Path.home() / ".local/share/applications/graftseg.desktop"]
     desk = Path.home() / "Desktop"
-    if desk.exists():
-        targets.append(desk / "graftseg.desktop")
-    for t in targets:
-        t.parent.mkdir(parents=True, exist_ok=True)
-        t.write_text(entry)
-        t.chmod(0o755)
+    written = []
+    if sys.platform.startswith("win"):
+        pyw = exe.with_name("pythonw.exe")
+        runner = pyw if pyw.exists() else exe
+        bat = desk / "GraftSeg.bat"
+        desk.mkdir(exist_ok=True)
+        bat.write_text(f'@echo off\nstart "" "{runner}" -m graftseg\n')  # text mode adds CRLF on Windows
+        written.append(bat)
+    elif sys.platform == "darwin":
+        cmd = desk / "GraftSeg.command"
+        cmd.write_text(f'#!/bin/bash\n"{exe}" -m graftseg &\n')
+        cmd.chmod(0o755)
+        written.append(cmd)
+    else:
+        entry = ("[Desktop Entry]\nType=Application\nName=GraftSeg\nComment=MRI graft segmentation\n"
+                 f"Exec=\"{exe}\" -m graftseg\nTerminal=false\nCategories=Science;MedicalSoftware;\n"
+                 "Icon=applications-science\nStartupWMClass=GraftSeg\n")
+        targets = [Path.home() / ".local/share/applications/graftseg.desktop"]
+        if desk.exists():
+            targets.append(desk / "graftseg.desktop")
+        for t in targets:
+            t.parent.mkdir(parents=True, exist_ok=True)
+            t.write_text(entry)
+            t.chmod(0o755)
+            written.append(t)
+    for t in written:
         print(f"wrote {t}")
 
 
@@ -194,7 +213,7 @@ def main(argv=None):
     s.add_argument("--workspace"); s.add_argument("--nnunet-raw", dest="nnunet_raw")
     s.add_argument("--nnunet-preprocessed", dest="nnunet_preprocessed")
     s.add_argument("--nnunet-results", dest="nnunet_results"); s.add_argument("--models-dir", dest="models_dir")
-    s.add_argument("--device", choices=["auto", "cuda", "cpu"])
+    s.add_argument("--device", choices=["auto", "cuda", "mps", "cpu"])
     s.set_defaults(fn=cmd_setup)
 
     s = sub.add_parser("doctor", help="check paths, GPU, installed packages, models"); s.set_defaults(fn=cmd_doctor)
@@ -220,7 +239,7 @@ def main(argv=None):
     s.add_argument("--planner", default="default", choices=["default", "resenc-m", "resenc-l", "resenc-xl"])
     s.add_argument("--restart", action="store_true", help="ignore existing checkpoints")
     s.add_argument("--replan", action="store_true"); s.add_argument("--gpus", type=int)
-    s.add_argument("--device", default="cuda", choices=["cuda", "cpu"])
+    s.add_argument("--device", default="cuda", choices=["cuda", "mps", "cpu"])
     s.add_argument("--register-as", help="register the finished model under this name")
     s.add_argument("--register-checkpoint", default="checkpoint_best.pth")
     s.set_defaults(fn=cmd_train)
@@ -239,7 +258,7 @@ def main(argv=None):
 
     s = sub.add_parser("predict", help="segment new scans (DICOM or .nrrd); writes .seg.nrrd next to each")
     s.add_argument("inputs", nargs="+"); s.add_argument("--model"); s.add_argument("--checkpoint")
-    s.add_argument("--device", choices=["auto", "cuda", "cpu"]); s.add_argument("--overwrite", action="store_true")
+    s.add_argument("--device", choices=["auto", "cuda", "mps", "cpu"]); s.add_argument("--overwrite", action="store_true")
     s.add_argument("--fast", action="store_true", help="no mirroring test-time augmentation (~8x faster)")
     s.add_argument("--with-fluid", action="store_true"); s.add_argument("--min-component-mm3", type=float, default=0)
     s.add_argument("--summary"); s.add_argument("--dry-run", action="store_true", help="only show names found")
@@ -255,7 +274,7 @@ def main(argv=None):
     s.set_defaults(fn=cmd_repair)
 
     s = sub.add_parser("gui", help="open the app"); s.set_defaults(fn=cmd_gui)
-    s = sub.add_parser("install-desktop", help="add GraftSeg to the Linux app menu"); s.set_defaults(fn=cmd_desktop)
+    s = sub.add_parser("install-desktop", help="add a GraftSeg launcher (app menu / desktop)"); s.set_defaults(fn=cmd_desktop)
 
     a = p.parse_args(argv)
     if a.cmd is None:
@@ -266,6 +285,9 @@ def main(argv=None):
         p.error("model default needs --name")
     try:
         a.fn(a)
+    except KeyboardInterrupt:
+        print("Stopped.")
+        sys.exit(130)
     except (FileNotFoundError, FileExistsError, RuntimeError, ValueError) as e:
         sys.exit(f"error: {e}")
 

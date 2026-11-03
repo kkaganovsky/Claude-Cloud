@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "graftseg"
-version = "0.1.0"
+version = "0.2.0"
 description = "Organoid graft segmentation on T2w rat MRI: nnU-Net training/prediction, model registry, review editor, 3D Slicer export"
 requires-python = ">=3.10"
 dependencies = ["nnunetv2>=2.5", "SimpleITK>=2.3", "pynrrd>=1.0", "pydicom>=2.4", "numpy", "scipy",

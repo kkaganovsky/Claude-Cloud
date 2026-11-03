@@ -56,32 +56,70 @@ def gpu_count() -> int:
         return 0
 
 
-def _bin(name: str) -> str:
-    cand = Path(sys.executable).parent / name
-    return str(cand) if cand.exists() else name
+# nnU-Net commands are run through this Python ("python -c ..."), so they work the same on Linux, macOS and Windows
+# and do not depend on PATH or on .exe wrappers being found.
+_ENTRY = {"nnUNetv2_plan_and_preprocess": ("nnunetv2.experiment_planning.plan_and_preprocess_entrypoints",
+                                           "plan_and_preprocess_entry"),
+          "nnUNetv2_train": ("nnunetv2.run.run_training", "run_training_entry")}
+
+
+def _nnunet(name: str) -> list[str]:
+    mod, fn = _ENTRY[name]
+    return [sys.executable, "-c", f"import sys; sys.argv[0] = {name!r}; from {mod} import {fn}; {fn}()"]
+
+
+def _stop_requested() -> bool:
+    f = os.environ.get("GRAFTSEG_STOP_FILE")
+    return bool(f) and Path(f).exists()
+
+
+def _interrupt(p: subprocess.Popen) -> None:
+    """Ask a child to stop: Ctrl+C on Linux/macOS; Windows cannot send Ctrl+C to it, so it is terminated."""
+    if os.name == "nt":
+        p.terminate()
+    else:
+        import signal
+        p.send_signal(signal.SIGINT)
 
 
 def _run(cmd: list[str], env: dict, log_path: Optional[Path], log=print) -> int:
-    log("$ " + " ".join(f'"{c}"' if " " in c else c for c in cmd))
-    fh = open(log_path, "a") if log_path else None
-    p = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+    name = next((k for k, (mod, _) in _ENTRY.items() if len(cmd) > 2 and mod in cmd[2]), "")
+    shown = ([name] + cmd[3:]) if name else cmd
+    log("$ " + " ".join(f'"{c}"' if " " in c else c for c in shown))
+    fh = open(log_path, "a", encoding="utf-8") if log_path else None
+    env = dict(env, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8")
+    p = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+                         encoding="utf-8", errors="replace")
+    done = threading.Event()
+
+    def watch():  # the app's Stop button creates GRAFTSEG_STOP_FILE (works on every OS)
+        while not done.wait(1.0):
+            if _stop_requested() and p.poll() is None:
+                log("Stop requested - stopping nnU-Net...")
+                _interrupt(p)
+                return
+    threading.Thread(target=watch, daemon=True).start()
     try:
         for line in p.stdout:
             if fh:
                 fh.write(line); fh.flush()
             log(line.rstrip("\n"))
         p.wait()
-    except KeyboardInterrupt:  # Stop button / Ctrl+C: let nnU-Net stop cleanly, never kill -9 mid-checkpoint
-        import signal
-        p.send_signal(signal.SIGINT)
+    except KeyboardInterrupt:  # Ctrl+C in a terminal
+        _interrupt(p)
         try:
             p.wait(timeout=120)
         except subprocess.TimeoutExpired:
-            p.terminate()
-        log("Stopped. Resume later with the same command (continues from the last checkpoint, saved every 50 epochs).")
+            p.kill()
         raise
-    if fh:
-        fh.close()
+    finally:
+        done.set()
+        if fh:
+            fh.close()
+    if _stop_requested():
+        log("Stopped. Start again with the same settings to continue from the last checkpoint "
+            "(saved every 50 epochs, and whenever validation improves).")
+        raise KeyboardInterrupt
     return p.returncode
 
 
@@ -102,7 +140,7 @@ def train(cfg: Config, dataset_id: int, folds: list[int], epochs: int = 1000, pl
     # 1. plan + preprocess
     pre = cfg.preprocessed / raw.name
     if replan or not (pre / f"{plans}.json").exists() or not (pre / f"{plans}_{CONFIG}").exists():
-        cmd = [_bin("nnUNetv2_plan_and_preprocess"), "-d", str(dataset_id), "-c", CONFIG, "-pl", pl_class,
+        cmd = [*_nnunet("nnUNetv2_plan_and_preprocess"), "-d", str(dataset_id), "-c", CONFIG, "-pl", pl_class,
                "--verify_dataset_integrity", "-npfp", "1", "-np", "1"]
         if _run(cmd, env, None, log) != 0:
             raise RuntimeError("nnUNetv2_plan_and_preprocess failed (see output above)")
@@ -113,10 +151,10 @@ def train(cfg: Config, dataset_id: int, folds: list[int], epochs: int = 1000, pl
     src_split = raw / "splits_final.json"
     if src_split.exists():
         dst = pre / "splits_final.json"
-        if dst.exists() and json.loads(dst.read_text()) != json.loads(src_split.read_text()):
+        if dst.exists() and json.loads(dst.read_text(encoding="utf-8")) != json.loads(src_split.read_text(encoding="utf-8")):
             log(f"WARNING: {dst} differs from the dataset's animal-level split; replacing it.")
         shutil.copy2(src_split, dst)
-        n = len(json.loads(src_split.read_text()))
+        n = len(json.loads(src_split.read_text(encoding="utf-8")))
         bad = [f for f in folds if f >= n]
         if bad:
             raise ValueError(f"Folds {bad} requested but the split has {n} folds")
@@ -131,7 +169,7 @@ def train(cfg: Config, dataset_id: int, folds: list[int], epochs: int = 1000, pl
     logs.mkdir(exist_ok=True)
 
     def fold_cmd(f: int) -> list[str]:
-        cmd = [_bin("nnUNetv2_train"), str(dataset_id), CONFIG, str(f), "-p", plans, "-tr", trainer, "--npz",
+        cmd = [*_nnunet("nnUNetv2_train"), str(dataset_id), CONFIG, str(f), "-p", plans, "-tr", trainer, "--npz",
                "-device", device]
         if resume and any((out / f"fold_{f}" / c).exists() for c in ("checkpoint_latest.pth", "checkpoint_final.pth",
                                                                     "checkpoint_best.pth")):
@@ -155,7 +193,13 @@ def train(cfg: Config, dataset_id: int, folds: list[int], epochs: int = 1000, pl
                         return
                     f = queue.pop(0)
                 e = dict(env, CUDA_VISIBLE_DEVICES=str(gpu))
-                rc = _run(fold_cmd(f), e, logs / f"fold_{f}.log", log=lambda s: None)
+                try:
+                    rc = _run(fold_cmd(f), e, logs / f"fold_{f}.log", log=lambda s: None)
+                except KeyboardInterrupt:
+                    with lock:
+                        queue.clear()
+                    log(f"fold {f}: stopped")
+                    return
                 log(f"fold {f} on GPU {gpu}: {'done' if rc == 0 else f'FAILED (exit {rc})'}")
                 if rc:
                     failures.append(f)
@@ -169,6 +213,8 @@ def train(cfg: Config, dataset_id: int, folds: list[int], epochs: int = 1000, pl
             log(f"=== fold {f} ({trainer}, {plans}) ===")
             if _run(fold_cmd(f), env, logs / f"fold_{f}.log", log) != 0:
                 failures.append(f)
+    if _stop_requested():
+        raise KeyboardInterrupt
     if failures:
         raise RuntimeError(f"Training failed for folds {failures}; logs in {logs}")
     log(f"Training output: {out}")
@@ -192,7 +238,7 @@ def status(cfg: Config, dataset_id: int) -> list[dict]:
         for fdir in sorted(tdir.glob("fold_*")):
             last_epoch, best, best_epoch, cur = None, None, None, None
             for logf in sorted(fdir.glob("training_log_*.txt")):
-                for line in logf.read_text(errors="ignore").splitlines():
+                for line in logf.read_text(encoding="utf-8", errors="ignore").splitlines():
                     m = _EPOCH.search(line)
                     if m:
                         cur = int(m.group(1)); last_epoch = cur

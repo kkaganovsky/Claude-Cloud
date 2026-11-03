@@ -213,7 +213,7 @@ def make_splits(cases: list[Case], n_folds: int = 5, seed: int = 12345) -> list[
 
 def _import_nnunet_dataset(src: Path, with_fluid: bool) -> tuple[list[Case], dict[int, int]]:
     """Existing nnU-Net dataset (e.g. Dataset001_GraftSeg) -> cases + label value remap."""
-    dj = json.loads((src / "dataset.json").read_text())
+    dj = json.loads((src / "dataset.json").read_text(encoding="utf-8"))
     remap = {0: 0}
     for name, value in dj.get("labels", {}).items():
         if isinstance(value, list):
@@ -348,7 +348,7 @@ def _write_csv(path: Path, cases: list[Case]) -> None:
     for r in rows:
         for k in ("graft_segments", "fluid_segments", "ignored_segments", "unknown_segments"):
             r[k] = " | ".join(r[k])
-    with open(path, "w", newline="") as f:
+    with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()) if rows else ["seg_path"])
         w.writeheader()
         w.writerows(rows)
