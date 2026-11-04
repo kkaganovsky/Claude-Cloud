@@ -1,9 +1,9 @@
-// Pomo Plan — morning priority planner, multi-day projects and end-of-day
+// HeavyPomo — morning priority planner, multi-day projects and end-of-day
 // summary for Pomo. Separate sandboxed app (no network). Idle cost is zero:
 // it only wakes on system wake, day change, or two daily one-shot timers.
 // Talks to Pomo only through local URLs (Launch Services):
-//   Pomo Plan → Pomo:  pomo://plan?d=<date>&p=<base64url JSON>
-//   Pomo → Pomo Plan:  pomoplan://open | pomoplan://summary | pomoplan://done?d=&t=&m=
+//   HeavyPomo → Pomo:  pomo://plan?d=<date>&p=<base64url JSON>
+//   Pomo → HeavyPomo:  heavypomo://open | heavypomo://summary | heavypomo://done?d=&t=&m=
 
 import Cocoa
 import SwiftUI
@@ -646,10 +646,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationDidFinishLaunching(_ note: Notification) {
         installMainMenu()
-        if !defaults.bool(forKey: "loginConfigured") {
-            try? SMAppService.mainApp.register()
-            defaults.set(true, forKey: "loginConfigured")
-        }
+        // Not registered as a login item by default; opt in via HeavyPomo menu → Launch at Login.
         let ws = NSWorkspace.shared.notificationCenter
         ws.addObserver(self, selector: #selector(checkTime), name: NSWorkspace.didWakeNotification, object: nil)
         ws.addObserver(self, selector: #selector(checkTime), name: NSWorkspace.screensDidWakeNotification, object: nil)
@@ -664,11 +661,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationWillTerminate(_ note: Notification) { store.save() }
 
-    // pomoplan://open | pomoplan://summary | pomoplan://done?d=&t=&m=
+    // heavypomo://open | heavypomo://summary | heavypomo://done?d=&t=&m=
     @objc private func handleURL(_ event: NSAppleEventDescriptor, reply: NSAppleEventDescriptor) {
         guard let str = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject))?.stringValue,
               str.count < 2_000,
-              let c = URLComponents(string: str), c.scheme == "pomoplan" else { return }
+              let c = URLComponents(string: str), c.scheme == "heavypomo" else { return }
         let q = { (name: String) in c.queryItems?.first(where: { $0.name == name })?.value }
         switch c.host {
         case "open": show(tab: 0)
@@ -720,7 +717,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if window == nil {
             let w = NSWindow(contentRect: .zero, styleMask: [.titled, .closable, .miniaturizable],
                              backing: .buffered, defer: false)
-            w.title = "Pomo Plan"
+            w.title = "HeavyPomo"
             w.isReleasedWhenClosed = false
             w.delegate = self
             w.contentViewController = NSHostingController(rootView: RootView(
@@ -765,11 +762,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window?.close()
     }
 
+    @objc private func toggleLogin(_ sender: NSMenuItem) {
+        let svc = SMAppService.mainApp
+        do {
+            if svc.status == .enabled { try svc.unregister() } else { try svc.register() }
+        } catch {
+            let a = NSAlert()
+            a.messageText = "Couldn't change Login Item"
+            a.informativeText = error.localizedDescription
+            a.runModal()
+        }
+        sender.state = svc.status == .enabled ? .on : .off
+    }
+
     private func installMainMenu() {
         let main = NSMenu()
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "Quit Pomo Plan", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let login = appMenu.addItem(withTitle: "Launch at Login", action: #selector(toggleLogin(_:)), keyEquivalent: "")
+        login.target = self
+        login.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Quit HeavyPomo", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         main.addItem(appItem)
         let editItem = NSMenuItem()

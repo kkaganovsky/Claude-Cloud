@@ -1,7 +1,8 @@
-# Pomo Plan — morning priority list for Pomo
+# HeavyPomo — morning priority list for Pomo
 
 A separate, sandboxed app (no network) that plans your day and hands it to Pomo.
 
+- **Doesn't start with your Mac by default.** Open it yourself; the morning prompt and the automatic summary only happen while it's running. To auto-start later: HeavyPomo menu (in the menu bar while its window is open) → **Launch at Login**.
 - **Morning prompt:** the first time your Mac is in use after 5:00 each day, the planner window opens. Closing it or pressing "Skip Today" stops it from asking again until tomorrow. To open it any time: Pomo menu → **Plan My Day…**, or open the app again.
 - **Each task:** a title, an **Urgent** slider and an **Important** slider (0–10), and how many 🍅 sessions it needs.
 - **Ranking:** score = 0.6 × Important + 0.4 × Urgent, so importance counts more. Each task shows its Eisenhower label: Do first, Schedule, Quick / delegate, or Maybe drop.
@@ -27,13 +28,13 @@ The specific numbers are my design choices, not taken from those sources: the 0.
 
 ## How the two apps talk (and why it's safe)
 
-Sandboxed apps can't read each other's data. So Pomo Plan sends the plan to Pomo by opening a local `pomo://plan?...` link, and Pomo reports each finished session back with `pomoplan://done?...` (title and minutes only). macOS delivers it directly to Pomo, and it never touches the internet. Pomo accepts only today's date, at most 30 tasks of up to 100 characters each, strips control characters, and caps sessions at 8. Any app on your Mac could send such a link, but the worst it could do is change today's suggested goals.
+Sandboxed apps can't read each other's data. So HeavyPomo sends the plan to Pomo by opening a local `pomo://plan?...` link, and Pomo reports each finished session back with `heavypomo://done?...` (title and minutes only). macOS delivers it directly to Pomo, and it never touches the internet. Pomo accepts only today's date, at most 30 tasks of up to 100 characters each, strips control characters, and caps sessions at 8. Any app on your Mac could send such a link, but the worst it could do is change today's suggested goals.
 
 ## Build
 
 ```bash
 ./build.sh
-mv "build/Pomo Plan.app" /Applications/ && open "/Applications/Pomo Plan.app"
+mv "build/HeavyPomo.app" /Applications/ && open "/Applications/HeavyPomo.app"
 ```
 
 Rebuild Pomo too (`../pomodoro-menubar/build.sh`): it gained the `pomo://` receiver and the plan menu. Requires macOS 13 or later.

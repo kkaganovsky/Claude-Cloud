@@ -61,7 +61,7 @@ private func pieImage(fraction: CGFloat, colour: NSColor) -> NSImage {
     return img
 }
 
-// MARK: - Day plan (received from Pomo Plan via pomo://plan?d=<date>&p=<base64url JSON>)
+// MARK: - Day plan (received from HeavyPomo via pomo://plan?d=<date>&p=<base64url JSON>)
 
 struct PlanItem: Codable {
     var t: String   // task title
@@ -256,20 +256,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func openPlanner() {
-        if let url = URL(string: "pomoplan://open"), !NSWorkspace.shared.open(url) {
+        if let url = URL(string: "heavypomo://open"), !NSWorkspace.shared.open(url) {
             let a = NSAlert()
-            a.messageText = "Pomo Plan isn't installed"
-            a.informativeText = "Build it from the pomo-plan folder and move it to /Applications."
+            a.messageText = "HeavyPomo isn't installed"
+            a.informativeText = "Build it from the heavypomo folder and move it to /Applications."
             NSApp.activate(ignoringOtherApps: true)
             a.runModal()
         }
     }
 
-    /// Tell Pomo Plan (if installed) a session finished, for the day summary
+    /// Tell HeavyPomo (if installed) a session finished, for the day summary
     /// and project tracking. Local URL only; doesn't bring the planner forward.
     private func reportToPlanner(goal: String, minutes: Int) {
         var c = URLComponents()
-        c.scheme = "pomoplan"
+        c.scheme = "heavypomo"
         c.host = "done"
         c.queryItems = [URLQueryItem(name: "d", value: todayString()),
                         URLQueryItem(name: "t", value: String(goal.prefix(100))),
@@ -281,7 +281,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func openSummary() {
-        if let url = URL(string: "pomoplan://summary"), !NSWorkspace.shared.open(url) { openPlanner() }
+        if let url = URL(string: "heavypomo://summary"), !NSWorkspace.shared.open(url) { openPlanner() }
     }
 
     @objc private func planPopupChanged(_ sender: NSPopUpButton) {
