@@ -18,3 +18,12 @@ Or download `Pomo-app` from the GitHub Actions run for this branch, unzip, move 
 `xattr -dr com.apple.quarantine /Applications/Pomo.app`.
 
 Requires macOS 13 (Ventura) or later.
+
+## Security
+
+- **No internet, enforced by macOS.** The app is built with the App Sandbox on and *no* network entitlement (`Pomo.entitlements`), so the OS blocks every incoming and outgoing connection. It also can't read your files outside its own container. The code itself contains no networking.
+- **Hardened Runtime** signing (blocks code injection and unsigned library loading).
+- **What it stores:** your last goal text and today's session count, in its sandboxed preferences only (`~/Library/Containers/com.kkaganovsky.pomo/`).
+- **Verify it yourself:** `codesign -d --entitlements - /Applications/Pomo.app` should show only `com.apple.security.app-sandbox`.
+- **CI build:** read-only token, no secrets, GitHub actions pinned to exact commit SHAs, credentials not kept after checkout, only the app folder checked out. A SHA-256 checksum ships with the zip (`shasum -a 256 Pomo.zip` to compare).
+- Building locally with `./build.sh` (about 150 lines of Swift you can read) avoids trusting any downloaded binary.

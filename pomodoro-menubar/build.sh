@@ -10,7 +10,11 @@ for arch in arm64 x86_64; do
 done
 lipo -create build/Pomo-arm64 build/Pomo-x86_64 -output "$APP/Contents/MacOS/Pomo"
 cp Info.plist "$APP/Contents/Info.plist"
-codesign --force --sign - "$APP"          # ad-hoc signature
+# Ad-hoc sign with hardened runtime + sandbox (no network entitlement).
+codesign --force --options runtime --entitlements Pomo.entitlements --sign - "$APP"
+codesign --verify --strict "$APP"
+codesign -d --entitlements - "$APP"
 (cd build && ditto -c -k --keepParent Pomo.app Pomo.zip)
+shasum -a 256 build/Pomo.zip | tee build/Pomo.zip.sha256
 echo "Built $APP and build/Pomo.zip"
 echo "Install:  mv build/Pomo.app /Applications/ && open /Applications/Pomo.app"

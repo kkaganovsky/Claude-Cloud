@@ -1,16 +1,29 @@
 name: Build Pomo.app
 on:
   push:
+    branches: ["claude/ecstatic-faraday-iakcai"]
     paths: ["pomodoro-menubar/**", ".github/workflows/pomo.yml"]
   workflow_dispatch:
+
+# Least privilege: the job can only read the repo; no write token, no secrets used.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: macos-14
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-        with: { lfs: false }
+      # Third-party actions pinned to full commit SHAs (immune to tag hijacking).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          sparse-checkout: pomodoro-menubar
       - run: ./pomodoro-menubar/build.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: Pomo-app
-          path: pomodoro-menubar/build/Pomo.zip
+          path: |
+            pomodoro-menubar/build/Pomo.zip
+            pomodoro-menubar/build/Pomo.zip.sha256
+          retention-days: 14
