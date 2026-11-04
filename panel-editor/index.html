@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panel Editor</title>
+<link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+<header id="top">
+  <strong class="brand">Panel Editor</strong>
+  <button id="btn-new" title="New blank artboard">New</button>
+  <button id="btn-open" title="Open .ai / .pdf (Ctrl+O)">Open…</button>
+  <button id="btn-save" class="primary" title="Save as .ai (Ctrl+S)">Save .ai</button>
+  <select id="export-menu" title="Export a copy">
+    <option value="">Export…</option>
+    <option value="pdf">PDF (lean copy)</option>
+    <option value="svg">SVG (this artboard)</option>
+    <option value="png">PNG 2× (this artboard)</option>
+  </select>
+  <span class="sep"></span>
+  <button id="btn-place" title="Place an image (PNG/JPG)">Place image…</button>
+  <span class="sep"></span>
+  <button id="btn-undo" title="Undo (Ctrl+Z)">↶</button>
+  <button id="btn-redo" title="Redo (Ctrl+Shift+Z)">↷</button>
+  <span class="sep"></span>
+  <button id="z-out">−</button><span id="zoom-label">100%</span><button id="z-in">+</button><button id="z-fit" title="Fit artboard (Ctrl+0)">Fit</button>
+  <span class="grow"></span>
+  <label>Artboard <select id="page-select"></select></label>
+  <button id="btn-addpage" title="Add artboard">+</button>
+  <span id="docname" class="docname"></span>
+  <input id="file-input" type="file" accept=".ai,.pdf,application/pdf,application/illustrator" hidden>
+  <input id="img-input" type="file" accept="image/png,image/jpeg" hidden>
+</header>
+<aside id="tools"></aside>
+<main id="stage"><div id="board"><div id="page-host"></div><svg id="overlay" xmlns="http://www.w3.org/2000/svg"></svg><textarea id="text-edit" hidden spellcheck="false"></textarea></div>
+  <div id="welcome"><h2>Panel Editor</h2><p>Drop an Illustrator <b>.ai</b> file (or a PDF) here, or press <b>Open…</b>.<br>Everything stays on your computer — nothing is uploaded.</p></div>
+</main>
+<aside id="side">
+  <section id="props"></section>
+  <section id="layers"></section>
+</aside>
+<footer id="status"><span id="status-msg">Ready</span><span class="grow"></span><button id="btn-warn" hidden></button><span id="status-xy"></span></footer>
+<div id="modal" hidden><div class="card"><h3></h3><div class="body"></div><button class="close primary">OK</button></div></div>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
