@@ -235,6 +235,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
         _ = add("Plan My Day…", #selector(openPlanner))
+        _ = add("Today's Summary…", #selector(openSummary))
         menu.addItem(.separator())
         let count = menu.addItem(withTitle: "Sessions today: \(sessionsToday)", action: nil, keyEquivalent: "")
         count.isEnabled = false
@@ -262,6 +263,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NSApp.activate(ignoringOtherApps: true)
             a.runModal()
         }
+    }
+
+    /// Tell Pomo Plan (if installed) a session finished, for the day summary
+    /// and project tracking. Local URL only; doesn't bring the planner forward.
+    private func reportToPlanner(goal: String, minutes: Int) {
+        var c = URLComponents()
+        c.scheme = "pomoplan"
+        c.host = "done"
+        c.queryItems = [URLQueryItem(name: "d", value: todayString()),
+                        URLQueryItem(name: "t", value: String(goal.prefix(100))),
+                        URLQueryItem(name: "m", value: String(minutes))]
+        guard let url = c.url, NSWorkspace.shared.urlForApplication(toOpen: url) != nil else { return }
+        let cfg = NSWorkspace.OpenConfiguration()
+        cfg.activates = false
+        NSWorkspace.shared.open(url, configuration: cfg, completionHandler: nil)
+    }
+
+    @objc private func openSummary() {
+        if let url = URL(string: "pomoplan://summary"), !NSWorkspace.shared.open(url) { openPlanner() }
     }
 
     @objc private func planPopupChanged(_ sender: NSPopUpButton) {
@@ -398,6 +418,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch phase {
         case .focus:
             sessionsToday += 1
+            let remaining = pausedRemaining ?? max(0, endDate.timeIntervalSinceNow)
+            reportToPlanner(goal: goal, minutes: Int(((focusLength - remaining) / 60).rounded()))
             var done = planDone
             done[goal, default: 0] += 1
             planDone = done
