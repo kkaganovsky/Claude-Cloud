@@ -1,0 +1,12 @@
+{
+  "id": "cells",
+  "cmd": "plotsuite-plot data/cells.csv -o plots/cells.pdf --groups Control,Treated --test unpaired_t --opt group_a=Control group_b=Treated --set 'y_label=Cells per mm2' y_min=0 --preset 'Xenocortical Nature style'",
+  "tool": "plotsuite-plot",
+  "builtAt": "2026-11-04T19:06:39+00:00",
+  "data": {
+    "path": "data/cells.csv",
+    "sha256": "d3a054de230b1bb24acd4580cceffb9988b1dbc1d4c870edb41482d6359561e5"
+  },
+  "fingerprint": "4bd259e410fbb3403b851ef00799255bc8c4afa1a7a2abdf9e3ed9e4328d242f",
+  "stats": "== Unpaired t test ==\nControl vs Treated: difference -4.104; t(18.00)=-4.683, P = 0.0002 (two-sided).\n\n-- Unpaired t test --\n                                    Value\nMean Control                     9.831000\nMean Treated                    13.935000\nDifference (Control - Treated)  -4.104000\n95% CI low                      -5.945134\n95% CI high                     -2.262866\nt                               -4.683084\ndf                              18.000000\nP                                0.000185\nCohen's d                       -2.094339\nn Control                       10.000000\nn Treated                       10.000000\n\nMethods: scipy.stats.ttest_ind(equal_var=True). [scipy 1.18.1, statsmodels 0.15.0, pingouin 0.7.0, scikit-posthocs 0.17.1, scikit-learn 1.9.1]\nwrote plots/cells.pdf  (0.81 x 1.30 in, 600 dpi, font Nimbus Sans)"
+}

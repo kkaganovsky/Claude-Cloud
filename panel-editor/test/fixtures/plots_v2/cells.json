@@ -1,0 +1,12 @@
+{
+  "id": "cells",
+  "cmd": "plotsuite-plot data/cells_v2.csv -o plots2/cells.pdf --groups Control,Treated,Drug --test oneway_anova --opt posthoc=tukey --set 'y_label=Cells per mm2' y_min=0 --preset 'Xenocortical Nature style'",
+  "tool": "plotsuite-plot",
+  "builtAt": "2026-11-04T19:06:44+00:00",
+  "data": {
+    "path": "data/cells_v2.csv",
+    "sha256": "a3eb2de000f73aec3627a82b9345f87a496afc847f0716c4a002251b65ec8f7a"
+  },
+  "fingerprint": "65d43a99314c136c468f73cdda6e3cd4355c1a623ca4f48ff9fd0da72348dbd5",
+  "stats": "== One-way ANOVA ==\nF(2, 27) = 19.025, P < 0.0001.\n\n-- ANOVA table --\n                                    SS  DF          MS          F         P\nBetween groups (treatment)  230.770887   2  115.385443  19.025444  0.000007\nWithin groups (residual)    163.749500  27    6.064796        NaN       NaN\nTotal                       394.520387  29         NaN        NaN       NaN\n\n-- R squared --\n        R2\n0  0.58494\n\n-- Multiple comparisons: tukey --\n                     Mean diff    CI low   CI high  Adjusted P Summary\nComparison                                                            \nControl vs. Treated     -3.176 -5.906693 -0.445307    0.020179       *\nControl vs. Drug        -6.789 -9.519693 -4.058307    0.000004    ****\nTreated vs. Drug        -3.613 -6.343693 -0.882307    0.007787      **\n\nMethods: scipy.stats.f_oneway; post-tests use the pooled within-group MSE (scipy.stats.tukey_hsd / dunnett, statsmodels.multipletests, studentized_range). [scipy 1.18.1, statsmodels 0.15.0, pingouin 0.7.0, scikit-posthocs 0.17.1, scikit-learn 1.9.1]\nwrote plots2/cells.pdf  (0.95 x 1.30 in, 600 dpi, font Nimbus Sans)"
+}

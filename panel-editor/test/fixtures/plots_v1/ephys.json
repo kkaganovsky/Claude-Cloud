@@ -1,0 +1,12 @@
+{
+  "id": "ephys",
+  "cmd": "plotsuite-plot data/ephys.csv -o plots/ephys.pdf --groups WT,KO,Rescue --test oneway_anova --opt posthoc=tukey --set 'y_label=Amplitude (pA)' y_min=0 --preset 'Xenocortical Nature style'",
+  "tool": "plotsuite-plot",
+  "builtAt": "2026-11-04T19:06:41+00:00",
+  "data": {
+    "path": "data/ephys.csv",
+    "sha256": "9c299a40fc1e3b8b41a375ac73598531455f82f3217bd9a0781a4fad200ebe45"
+  },
+  "fingerprint": "e37611c3cb2a52d5a4c6cd990f3a7998c69ea44302cec3c7c9e59fc079323b86",
+  "stats": "== One-way ANOVA ==\nF(2, 27) = 41.582, P < 0.0001.\n\n-- ANOVA table --\n                                    SS  DF          MS          F             P\nBetween groups (treatment)  318.822727   2  159.411363  41.582174  5.699757e-09\nWithin groups (residual)    103.508460  27    3.833647        NaN           NaN\nTotal                       422.331187  29         NaN        NaN           NaN\n\n-- R squared --\n         R2\n0  0.754912\n\n-- Multiple comparisons: tukey --\n               Mean diff    CI low    CI high    Adjusted P Summary\nComparison                                                         \nWT vs. KO          7.845  5.673945  10.016055  4.207581e-09    ****\nWT vs. Rescue      2.632  0.460945   4.803055  1.514023e-02       *\nKO vs. Rescue     -5.213 -7.384055  -3.041945  6.992280e-06    ****\n\nMethods: scipy.stats.f_oneway; post-tests use the pooled within-group MSE (scipy.stats.tukey_hsd / dunnett, statsmodels.multipletests, studentized_range). [scipy 1.18.1, statsmodels 0.15.0, pingouin 0.7.0, scikit-posthocs 0.17.1, scikit-learn 1.9.1]\nwrote plots/ephys.pdf  (0.95 x 1.30 in, 600 dpi, font Nimbus Sans)"
+}

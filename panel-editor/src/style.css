@@ -36,3 +36,12 @@ section h4{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing
 .card h3{margin:0 0 10px}.card ul{padding-left:18px}
 #stage.drop{outline:3px dashed var(--accent);outline-offset:-6px}
 #btn-warn{background:#6b5200;border-color:#a37b00}
+
+.chk{display:flex;align-items:center;gap:4px;color:var(--dim);cursor:pointer}.chk input{padding:0}
+.prow{display:flex;align-items:center;gap:4px;padding:3px 4px;border-radius:5px;cursor:pointer}.prow.on{background:#4a9eff33}
+.prow .lt{width:30px;font-weight:700;color:#fff;text-align:center;background:#555;border-radius:4px;font-size:11px;padding:1px 0}
+.prow input[type=text]{flex:1;min-width:0;padding:1px 4px;font-size:12px}.prow select{width:70px;padding:1px;font-size:11px}
+.prow button{padding:0 5px;border:0;background:none}
+.badge{font-size:10px;padding:0 5px;border-radius:8px;background:#2d6a3d;color:#fff}.badge.stale{background:#8a5a00}
+details{margin:6px 0;font-size:12px}details pre{white-space:pre-wrap;max-height:140px;overflow:auto;background:#0003;padding:6px;border-radius:5px;font-size:11px}
+.warn{color:#ffc857;font-size:12px;margin:4px 0}

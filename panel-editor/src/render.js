@@ -35,7 +35,8 @@ function build(o, defs) {
   if (o.type === 'path') {
     const e = el('path', {
       d: segsToD(o.segs),
-      fill: paintAttr(o.fill, defs), stroke: paintAttr(o.stroke, defs),
+      // a panel's invisible frame stays clickable in the editor (transparent, not 'none'); it is never drawn or exported
+      fill: o.role === 'frame' ? 'transparent' : paintAttr(o.fill, defs), stroke: paintAttr(o.stroke, defs),
       'stroke-width': o.stroke ? o.sw : null,
       'stroke-linecap': ['butt', 'round', 'square'][o.cap] || 'butt',
       'stroke-linejoin': ['miter', 'round', 'bevel'][o.join] || 'miter',

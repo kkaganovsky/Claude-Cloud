@@ -21,6 +21,9 @@
   <span class="sep"></span>
   <button id="btn-place" title="Place an image (PNG/JPG)">Place image…</button>
   <span class="sep"></span>
+  <label class="chk" title="Smart guides: snap edges/centres to other panels"><input type="checkbox" id="chk-snap" checked> Snap</label>
+  <label class="chk" title="Show lab column grid (and snap to it)"><input type="checkbox" id="chk-grid"> Grid</label>
+  <span class="sep"></span>
   <button id="btn-undo" title="Undo (Ctrl+Z)">↶</button>
   <button id="btn-redo" title="Redo (Ctrl+Shift+Z)">↷</button>
   <span class="sep"></span>
@@ -31,6 +34,8 @@
   <span id="docname" class="docname"></span>
   <input id="file-input" type="file" accept=".ai,.pdf,application/pdf,application/illustrator" hidden>
   <input id="img-input" type="file" accept="image/png,image/jpeg" hidden>
+  <input id="plot-input" type="file" accept=".pdf,.json,application/pdf,application/json" multiple hidden>
+  <input id="update-input" type="file" accept=".pdf,.json,application/pdf,application/json" multiple hidden>
 </header>
 <aside id="tools"></aside>
 <main id="stage"><div id="board"><div id="page-host"></div><svg id="overlay" xmlns="http://www.w3.org/2000/svg"></svg><textarea id="text-edit" hidden spellcheck="false"></textarea></div>
@@ -38,6 +43,7 @@
 </main>
 <aside id="side">
   <section id="props"></section>
+  <section id="panels"></section>
   <section id="layers"></section>
 </aside>
 <footer id="status"><span id="status-msg">Ready</span><span class="grow"></span><button id="btn-warn" hidden></button><span id="status-xy"></span></footer>
