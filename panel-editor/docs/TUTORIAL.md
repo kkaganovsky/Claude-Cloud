@@ -11,7 +11,7 @@ Everything below was run against the real app; the screenshots are generated fro
 [0 Setup](#0-setup) · [1 Make the plots](#1-make-the-plots-from-data) · [2 New project and place plots](#2-start-a-project-and-place-the-plots) ·
 [3 Images and callouts](#3-add-a-micrograph-and-a-callout) · [4 Arrange](#4-arrange-and-snap) · [5 Legend references](#5-write-a-legend-that-cites-panels) ·
 [6 Reorder](#6-move-panels-around-letters-follow) · [7 Supplement](#7-move-a-panel-to-the-supplement) · [8 Data changed](#8-the-data-changed) ·
-[9 Save and share](#9-save-share-export) · [10 Existing .ai](#10-working-on-an-existing-illustrator-file) · [Cheat sheet](#cheat-sheet) · [Troubleshooting](#troubleshooting)
+[9 Save and share](#9-save-share-export) · [10 Existing .ai](#10-working-on-an-existing-illustrator-file) · [11 Switching journals](#11-switching-journals) · [Cheat sheet](#cheat-sheet) · [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -207,6 +207,48 @@ carried across. Read the README's limits before using this for final art: fonts 
 RGB, and a saved file has not been verified inside Adobe Illustrator itself.
 
 ---
+
+## 11. Switching journals
+
+Rejected from one journal, going to another? Everything about a figure that depends on the journal is derived,
+so the switch is one action.
+
+> **Read this first:** the built-in Nature, Cell and Science numbers are **unverified**. They come from web-search
+> summaries of each journal's guidelines (the journals' own pages could not be opened when this was built) and they
+> contradict each other in places. See [JOURNAL-RULES.md](JOURNAL-RULES.md) for every value with its source and the
+> conflicts. Check them against the journal's current instructions, correct them in **Edit rules…**, and tick
+> *I checked these*. Until then the sidebar shows an **unverified** badge.
+
+1. In the **Journal** box of the sidebar, click **Switch journal…**.
+
+   ![switch journal dialog](img/10-switch-journal.png)
+
+2. Pick the journal. **Width**: keep each figure's column choice (single→single, double→double) or force one for all.
+   Leave *scale artwork* ticked to scale each figure uniformly to the new width; untick it to change only the artboard.
+   *Bring text sizes into range* resizes text outside the journal's min/max.
+3. **Convert.** One undo step. You get a report of what changed:
+
+   ![conversion report](img/11-converted.png)
+
+   * artboard width and artwork scale for each figure,
+   * panel letters restyled (case, size, weight) and re-lettered (`Fig. 1a` ⇄ `Figure 1A`),
+   * supplement naming (`Supplementary Fig. 1` ⇄ `Figure S1` ⇄ `fig. S1`), exported file names included,
+   * every `{{ref}}` in your legends updated, and the renumbering added to the **Change log**.
+4. **Check rules** lists remaining problems (wrong width, text too small or too large, wrong letter style,
+   overlaps, panels outside the artboard) and *select* jumps to the offending objects.
+
+   ![check rules](img/13-check-rules.png)
+
+5. After a big down-scale, text may have been enlarged to the journal's minimum and things can crowd: use
+   **Auto-arrange**, then fix by hand.
+
+**Edit rules…** changes any number (widths, height, letter style, text range, line weight, name prefixes) and shows
+where each value came from:
+
+![edit rules](img/12-edit-rules.png)
+
+For a single figure, the **Width** dropdown in the Journal box sets just that figure to the journal's single, 1.5 or
+double column (artwork scales with it). Your edited rules are saved inside the `.ai`.
 
 ## Cheat sheet
 

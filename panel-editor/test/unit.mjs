@@ -145,3 +145,62 @@ test('pushRow shifts only the right-hand neighbours in the same row', () => {
   const moved = L.pushRow(d, 0, a, 100, 10); assert.deepEqual(moved, [b]);
   assert.equal(P.panelFrame(pg, b)[0], bx + 10); assert.equal(P.panelFrame(pg, c)[0], cx);
 });
+
+// ---------------- journals ----------------
+import * as J from '../src/journals.js';
+const txt = (doc, x, y, size, str = 'Label') => { const t = { id: 't' + Math.random().toString(36).slice(2), type: 'text', str, m: [1, 0, 0, -1, x, y], size, fontName: 'Arial', family: 'Arial', bold: false, italic: false, generic: 'sans-serif', fill: '#000', stroke: null, sw: 1, opacity: 1, leading: 1.2, layer: doc.layers[0].id, clips: [] }; doc.pages[0].objects.push(t); return t; };
+function journalDoc(key, wMm) {
+  const d = P.ensure(newDoc(wMm * J.MM, 400, 'j')); J.applyJournalSettings(d, key);
+  d.pages.push({ w: wMm * J.MM, h: 400, objects: [], fig: { kind: 'supp', title: '' } });
+  const a = addPanel(d, 0, 10, 30, 90, 93.6, 'A'), b = addPanel(d, 0, 120, 30, 90, 93.6, 'B'); addPanel(d, 1, 10, 30, 90, 93.6, 'S'); addPanel(d, 1, 120, 30, 90, 93.6, 'T');
+  txt(d, 12, 140, 7); txt(d, 130, 140, 5.5); P.applyLabels(d); return d;
+}
+test('journal rules ship UNVERIFIED with sources, and every width is a number or null', () => {
+  for (const k of ['nature', 'cell', 'science']) {
+    const r = J.JOURNALS[k]; assert.equal(r.verified, false, k + ' must not claim to be verified'); assert.ok(r.sources.widths, k + ' widths have a source'); assert.ok(r.alt.length, k + ' lists conflicting values');
+    assert.ok(Object.values(r.widthsMm).every((v) => v === null || typeof v === 'number'));
+  }
+  assert.ok(/NOT from the sources/.test(J.JOURNALS.cell.sources.names), 'naming convention flagged as not sourced');
+});
+test('Nature -> Cell: capital letters, Figure/S naming, 183 -> 174 mm, content scaled', () => {
+  const d = journalDoc('nature', 183); assert.equal(Object.values(d.panels).find((p) => p.name === 'A').label, 'Fig. 1a'); assert.equal(Object.values(d.panels).find((p) => p.name === 'S').label, 'Supplementary Fig. 1a');
+  const w0 = P.panelFrame(d.pages[0], Object.values(d.panels).find((p) => p.name === 'A').id);
+  const rep = J.convertJournal(d, 'cell'); const R = J.JOURNALS.cell; const k = (174 * J.MM) / (183 * J.MM);
+  assert.ok(Math.abs(d.pages[0].w - 174 * J.MM) < 1e-6 && Math.abs(d.pages[0].h - 400 * k) < 1e-6);
+  assert.equal(Object.values(d.panels).find((p) => p.name === 'A').label, 'Figure 1A'); assert.equal(Object.values(d.panels).find((p) => p.name === 'S').label, 'Figure S1A');
+  const w1 = P.panelFrame(d.pages[0], Object.values(d.panels).find((p) => p.name === 'A').id); assert.ok(Math.abs((w1[2] - w1[0]) - (w0[2] - w0[0]) * k) < 1e-6, 'panel scaled by the width ratio');
+  const lab = d.pages[0].objects.find((o) => o.role === 'label'); assert.equal(lab.str, lab.str.toUpperCase()); assert.equal(lab.size, 8); assert.equal(lab.m[0], 1);
+  assert.ok(rep.relabelled.some((c) => c.from === 'Fig. 1a' && c.to === 'Figure 1A'));
+  assert.ok(d.pages[0].objects.filter((o) => o.type === 'text' && !o.role).every((o) => o.size * Math.hypot(o.m[0], o.m[1]) >= 6 - 1e-9), 'text raised to Cell minimum 6 pt');
+});
+test('column choice maps across journals (single -> single) and can be overridden', () => {
+  const d = journalDoc('nature', 89); J.convertJournal(d, 'cell'); assert.ok(Math.abs(d.pages[0].w - 85 * J.MM) < 1e-6, 'Nature single 89 -> Cell single 85');
+  const e = journalDoc('nature', 89); J.convertJournal(e, 'science', { column: 'double' }); assert.ok(Math.abs(e.pages[0].w - 184 * J.MM) < 1e-6, 'forced double');
+});
+test('Science: 10 pt bold capital letters; round trip Nature -> Science -> Nature returns to the starting width and lowercase', () => {
+  const d = journalDoc('nature', 183); const startW = d.pages[0].w; J.convertJournal(d, 'science');
+  const lab = d.pages[0].objects.find((o) => o.role === 'label'); assert.equal(lab.size, 10); assert.ok(lab.bold); assert.ok(lab.str.length > 0 && lab.str === lab.str.toUpperCase());
+  assert.equal(Object.values(d.panels).find((p) => p.name === 'S').label, 'fig. S1A');
+  J.convertJournal(d, 'nature'); assert.ok(Math.abs(d.pages[0].w - startW) < 1e-6); assert.equal(Object.values(d.panels).find((p) => p.name === 'A').label, 'Fig. 1a');
+});
+test('conversion without scaling keeps artwork size, only the artboard and styling change', () => {
+  const d = journalDoc('nature', 183); const f0 = P.panelFrame(d.pages[0], Object.values(d.panels)[0].id); J.convertJournal(d, 'cell', { scaleContent: false });
+  const f1 = P.panelFrame(d.pages[0], Object.values(d.panels)[0].id); assert.deepEqual(f0, f1); assert.ok(Math.abs(d.pages[0].w - 174 * J.MM) < 1e-6);
+});
+test('preflight finds wrong width, too-small text, wrong letter style; reports OK when clean; overrides take effect', () => {
+  const d = journalDoc('nature', 183); const t = txt(d, 12, 200, 3); d.pages[0].w = 200 * J.MM;
+  let out = J.preflight(d); assert.ok(out.some((x) => x.level === 'error' && /smaller than 5 pt/.test(x.msg) && x.ids.includes(t.id)));
+  assert.ok(out.some((x) => /not one of Nature's widths/.test(x.msg))); assert.ok(out.some((x) => /UNVERIFIED/.test(x.msg)));
+  const clean = journalDoc('nature', 183); clean.pages[0].objects = clean.pages[0].objects.filter((o) => !(o.type === 'text' && o.size === 5.5 && !o.role)); clean.pages[1].objects.forEach(() => {});
+  clean.pages[0].objects.filter((o) => o.type === 'text' && !o.role).forEach((o) => { o.size = 6; });
+  out = J.preflight(clean); assert.ok(!out.some((x) => x.level === 'error'), JSON.stringify(out));
+  clean.settings.journalOverrides = { nature: { text: { minPt: 6.5 } } }; assert.ok(J.preflight(clean).some((x) => /smaller than 6.5 pt/.test(x.msg)), 'edited rule is used');
+  clean.settings.journalChecked = { nature: true }; assert.ok(!J.preflight(clean).some((x) => /UNVERIFIED/.test(x.msg)), 'ticking "I checked these" clears the warning');
+  d.settings.journal = 'lab'; d.pages[0].w = 612; assert.ok(!J.preflight(d).some((x) => /width|smaller/.test(x.msg)), 'lab preset has no external rules to violate');
+});
+
+test('setFigureWidth scales one figure to a journal column', () => {
+  const d = journalDoc('nature', 183); const k = J.setFigureWidth(d, 0, 'single'); assert.ok(Math.abs(d.pages[0].w - 89 * J.MM) < 1e-6); assert.ok(Math.abs(k - 89 / 183) < 1e-9);
+  assert.ok(Math.abs(d.pages[1].w - 183 * J.MM) < 1e-6, 'other figures untouched'); assert.equal(J.setFigureWidth(d, 0, 'nope'), null);
+  assert.ok(d.pages[0].objects.filter((o) => o.role === 'label').every((o) => Math.abs(o.size * Math.hypot(o.m[0], o.m[1]) - 8) < 1e-9), 'letters keep 8 pt after scaling');
+});

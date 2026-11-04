@@ -14,8 +14,8 @@ export const DEFAULTS = {
   letterCase: 'lower', // 'lower' (Nature) | 'upper'
   omitSingle: true, // no letter when a figure has a single panel
   rowTol: 30, // pt: panels whose tops differ by less than this are in the same row
-  names: { main: 'Fig.', supp: 'Supplementary Fig.', ed: 'Extended Data Fig.' },
-  fileNames: { main: 'Figure', supp: 'Supplementary Figure', ed: 'Extended Data Figure' },
+  names: { main: 'Fig. ', supp: 'Supplementary Fig. ', ed: 'Extended Data Fig. ' }, // prefix + number, so 'Figure S' + 1 = 'Figure S1'
+  fileNames: { main: 'Figure ', supp: 'Supplementary Figure ', ed: 'Extended Data Figure ' },
   labelSize: 8, labelBold: true,
 };
 export const KINDS = { main: 'Main figure', supp: 'Supplementary', ed: 'Extended Data' };
@@ -34,7 +34,7 @@ export function figureInfo(doc) {
   ensure(doc); const st = settings(doc); const count = {};
   return doc.pages.map((p, i) => {
     const kind = p.fig.kind; count[kind] = (count[kind] || 0) + 1;
-    return { page: i, kind, n: count[kind], name: `${st.names[kind]} ${count[kind]}`, file: `${st.fileNames[kind]} ${count[kind]}`, title: p.fig.title || '' };
+    return { page: i, kind, n: count[kind], name: `${st.names[kind]}${count[kind]}`, file: `${st.fileNames[kind]}${count[kind]}`, title: p.fig.title || '' };
   });
 }
 

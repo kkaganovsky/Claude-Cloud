@@ -50,4 +50,11 @@ await ev((id) => { __app.updateTarget = id; }, cellsId);
 await p.setInputFiles('#update-input', [F + '/plots_v2/cells.pdf', F + '/plots_v2/cells.json']); await p.waitForTimeout(900);
 await ev((id) => __api.select(__app.doc.pages[0].objects.filter((o) => o.panel === id).map((o) => o.id)), cellsId); await p.waitForTimeout(200);
 await shot('09-data-changed');
+// journals: start from a Nature-width figure, then switch to Cell
+await ev(() => { const d = __app.doc; __api.JN.setFigureWidth(d, 0, 'double'); __api.JN.applyJournalSettings(d, 'nature'); __api.renderAll(); __api.fit(); });
+await p.waitForTimeout(300);
+await p.click('#panels [data-act="jswitch"]'); await p.waitForSelector('#sj-to'); await p.selectOption('#sj-to', 'cell'); await shot('10-switch-journal');
+await p.click('#modal .close'); await p.waitForTimeout(500); await shot('11-converted'); await p.click('#modal .close');
+await p.click('#panels [data-act="jedit"]'); await p.waitForSelector('#er-t1'); await shot('12-edit-rules'); await p.click('#modal .cancel');
+await p.click('#panels [data-act="jcheck"]'); await p.waitForTimeout(200); await shot('13-check-rules');
 await b.close(); await server.close(); console.log('screenshots written to', OUT);

@@ -106,6 +106,20 @@ frame, 8 pt gutters. The lab's real rules (letter size/offset, margins, panel sp
 The "wiki" mentioned for the figure generator was not found in this repository's branches, so the integration targets
 `plotsuite-plot`'s CLI/PDF output and its `--save-project` is not used yet.
 
+## Journal rules (Nature, Cell, Science) and switching journals
+
+Each journal is a rule set: figure widths (single / 1.5 / double), maximum height, panel-letter style, text-size range,
+minimum line weight, and figure-naming prefixes (`Fig. 1a`, `Figure 1A`, `fig. S1`…). Choose **Switch journal…** to convert the
+whole project: artboards are resized, artwork scaled, letters restyled and renamed, text brought into range, every
+`{{ref}}` updated, in one undo step with a report. **Check rules** is a pre-flight. **Edit rules…** changes any value and
+saves it in the file. The Lab preset holds your own conventions.
+
+> **The built-in Nature / Cell / Science values are UNVERIFIED.** They come from web-search summaries because the
+> journals' pages could not be fetched here, and those summaries conflict (e.g. three different Nature single-column
+> widths). The app labels them *unverified* until you tick *I checked these*. Every value and its source or conflict is
+> listed in [docs/JOURNAL-RULES.md](docs/JOURNAL-RULES.md). Supplement/extended-data naming for all three is convention,
+> not sourced.
+
 ## How it works
 
 `src/import.js` walks pdf.js's operator list (paths, colours, gradients, clips, images, text matrices, marked
@@ -118,7 +132,7 @@ subsetted Liberation fonts). `src/main.js` is the editor UI.
 ```bash
 npm run build
 npm i -D playwright && npx playwright install chromium   # once
-npm test          # unit (14) + UI e2e (37) + figure-workflow e2e (56, uses real plotsuite output fixtures)
+npm test          # unit (21) + UI e2e (37) + figure-workflow e2e (56, real plotsuite fixtures) + journals e2e (26)
 ```
 
 `test/make_fixture.py` (reportlab) generates an independent `.ai`-style fixture with gradients, a clip, dashes,

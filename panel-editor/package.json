@@ -9,7 +9,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test test/unit.mjs && node test/run.mjs && node test/panels-e2e.mjs",
+    "test": "node --test test/unit.mjs && node test/run.mjs && node test/panels-e2e.mjs && node test/journals-e2e.mjs",
     "test:unit": "node --test test/unit.mjs"
   },
   "dependencies": {

@@ -47,3 +47,5 @@ details{margin:6px 0;font-size:12px}details pre{white-space:pre-wrap;max-height:
 .warn{color:#ffc857;font-size:12px;margin:4px 0}
 
 .mbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}.card ol{padding-left:20px}.card li{margin:4px 0}.card .row input,.card .row select{flex:1}
+
+.jbox{margin:8px 0;padding:6px 8px;border:1px solid var(--line);border-radius:6px}.card input[type=text]{width:100%}.card ul{margin:6px 0}

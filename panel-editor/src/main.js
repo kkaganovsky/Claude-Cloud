@@ -10,6 +10,7 @@ import * as LY from './layout.js';
 import { placePlot, refreshPlot, checkFolder, stem, overlapsFor } from './link.js';
 import { objBounds } from './geom.js';
 import { zip } from './zip.js';
+import * as JN from './journals.js';
 
 const $ = (s) => document.querySelector(s);
 const S = {
@@ -763,7 +764,7 @@ async function placeImage(file) {
   S.sel = new Set(PN.panelObjects(S.doc.pages[S.page], id).map((q) => q.id)); commit(); renderAll(); status(`Placed “${file.name}” as a panel`);
 }
 let modalOk = null;
-function modal(title, html, onOk = null) { const m = $('#modal'); m.querySelector('h3').textContent = title; m.querySelector('.body').innerHTML = html; modalOk = onOk; m.querySelector('.cancel').hidden = !onOk; m.querySelector('.close').textContent = onOk ? 'Create' : 'OK'; m.hidden = false; }
+function modal(title, html, onOk = null, okLabel = 'Create') { const m = $('#modal'); m.querySelector('h3').textContent = title; m.querySelector('.body').innerHTML = html; modalOk = onOk; m.querySelector('.cancel').hidden = !onOk; m.querySelector('.close').textContent = onOk ? okLabel : 'OK'; m.hidden = false; }
 $('#modal .close').addEventListener('click', () => { $('#modal').hidden = true; const f = modalOk; modalOk = null; f?.(); });
 $('#modal .cancel').addEventListener('click', () => { $('#modal').hidden = true; modalOk = null; });
 function showHelp() {
@@ -798,6 +799,10 @@ function renderPanels() {
     <div class="dim" style="font-size:12px">→ <b>${esc(fi.name)}</b> · exported as “${esc(fi.file)}.ai”</div>
     <div class="btns"><button data-act="addfig-main">+ Main</button><button data-act="addfig-supp">+ Supplementary</button><button data-act="addfig-ed">+ Extended Data</button></div>
     <div class="btns"><button data-act="figleft" title="Move this figure earlier — numbers shift">◀ Earlier</button><button data-act="figright">Later ▶</button><button data-act="figdel">Delete figure</button></div>`;
+  const JR = JN.rulesFor(doc); const curCol = JN.currentColumn(JR, doc.pages[S.page].w);
+  h += `<div class="jbox"><div class="row"><label>Journal</label><b>${esc(JR.name)}</b>${doc.settings.journal && doc.settings.journal !== 'lab' ? `<span class="badge ${JR.verified ? '' : 'stale'}" title="${JR.verified ? 'you marked these rules as checked' : 'values come from search summaries, not the journal pages: check them in Edit rules'}">${JR.verified ? 'checked' : 'unverified'}</span>` : ''}</div>
+    ${JR.widthsMm.single || JR.widthsMm.double ? `<div class="row"><label>Width</label><select data-jwidth><option value="">${curCol ? esc(JN.COL_LABEL[curCol]) + ' ✓' : `${(doc.pages[S.page].w / JN.MM).toFixed(1)} mm (not a ${esc(JR.name)} width)`}</option>${JN.COLS.filter((c) => JR.widthsMm[c]).map((c) => `<option value="${c}">${esc(JN.COL_LABEL[c])} — ${JR.widthsMm[c]} mm (scales this figure)</option>`).join('')}</select></div>` : ''}
+    <div class="btns"><button data-act="jswitch" title="Re-style every figure for another journal">Switch journal…</button><button data-act="jcheck">Check rules</button><button data-act="jedit">Edit rules…</button></div></div>`;
   h += '<div style="margin-top:8px">' + (ids.length ? ids.map((id, i) => {
     const p = doc.panels[id]; const lab = p.label || '';
     const others = figs.filter((f) => f.page !== S.page).map((f) => `<option value="${f.page}">${esc(f.name)}</option>`).join('');
@@ -837,6 +842,9 @@ panelEl.addEventListener('click', async (e) => {
   const pid = row?.dataset.pid;
   switch (act) {
     case 'group': groupSel(); break;
+    case 'jswitch': switchJournalDialog(); break;
+    case 'jcheck': showPreflight(); break;
+    case 'jedit': editRulesDialog(); break;
     case 'addfig-main': case 'addfig-supp': case 'addfig-ed': addFigure(act.slice(7)); break;
     case 'figleft': moveFigure(-1); break;
     case 'figright': moveFigure(1); break;
@@ -856,7 +864,8 @@ panelEl.addEventListener('click', async (e) => {
 });
 panelEl.addEventListener('change', (e) => {
   const t = e.target;
-  if (t.dataset.fig) mutate(() => { S.doc.pages[S.page].fig[t.dataset.fig] = t.value; });
+  if (t.dataset.jwidth !== undefined) { if (!t.value) return; mutate(() => { JN.setFigureWidth(S.doc, S.page, t.value); }); fit(); status(`Figure set to ${JN.COL_LABEL[t.value].toLowerCase()} width — artwork scaled uniformly`); }
+  else if (t.dataset.fig) mutate(() => { S.doc.pages[S.page].fig[t.dataset.fig] = t.value; });
   else if (t.dataset.set) mutate(() => { S.doc.settings[t.dataset.set] = t.type === 'checkbox' ? t.checked : t.value; if (t.dataset.set === 'orderMode' && t.value === 'manual') PN.orderedPanels(S.doc, S.page).forEach((id, i) => { S.doc.panels[id].order ??= i; }); });
   else if (t.dataset.pname) mutate(() => { S.doc.panels[t.dataset.pname].name = t.value || 'Panel'; });
   else if (t.dataset.pmove !== undefined) { if (t.value === '') return; const id = t.closest('[data-pid]').dataset.pid; mutate(() => { PN.movePanelToPage(S.doc, id, +t.value, { margin: LY.layoutOf(S.doc).margin + 10 }); S.sel = new Set(); }); status('Moved panel — letters and references renumbered'); }
@@ -961,6 +970,62 @@ async function startWatch() {
 }
 function stopWatch() { S.watching = false; S.dir = null; clearInterval(pollTimer); renderPanels(); }
 
+
+// ---------- journals: switch (convert), check, edit rules ----------
+function switchJournalDialog() {
+  const cur = S.doc.settings.journal || 'lab';
+  const opts = JN.JOURNAL_KEYS.map((k) => `<option value="${k}" ${k === cur ? 'disabled' : ''}>${esc(JN.JOURNALS[k].name)}${k === cur ? ' (current)' : ''}</option>`).join('');
+  modal('Switch journal', `<p class="dim">Re-styles <b>every figure</b>: artboard width, artwork scale, panel-letter style (case/size/weight), figure naming (“Fig. 1a” ↔ “Figure 1A”, supplement “S” numbering), text sizes and the grid. Panels keep their identity, so every reference updates. One undo step.</p>
+    <div class="row"><label>To</label><select id="sj-to">${opts}</select></div>
+    <div class="row"><label>Width</label><select id="sj-col"><option value="auto">Keep each figure's column (single→single…)</option>${JN.COLS.map((c) => `<option value="${c}">All figures: ${esc(JN.COL_LABEL[c])}</option>`).join('')}</select></div>
+    <div class="row"><label></label><label style="width:auto"><input type="checkbox" id="sj-scale" checked> scale artwork to the new width</label></div>
+    <div class="row"><label></label><label style="width:auto"><input type="checkbox" id="sj-text" checked> bring text sizes into the journal's range</label></div>
+    <div class="warn" id="sj-warn"></div>`, () => {
+    const to = $('#sj-to').value; if (!to || to === cur) return;
+    let rep; S._before ??= snapshot();
+    rep = JN.convertJournal(S.doc, to, { column: $('#sj-col').value, scaleContent: $('#sj-scale').checked, fixText: $('#sj-text').checked });
+    if (rep.relabelled.length) S.changeLog.unshift({ t: Date.now(), changes: rep.relabelled });
+    commit(); renderAll(); fit();
+    const lines = [...rep.pages.map((p) => `Figure ${p.page + 1}: ${p.fromMm} → ${p.toMm} mm (${p.column}${p.scaled ? `, artwork ×${p.k}` : ', artwork not scaled'})`), ...rep.changes, ...rep.warnings.map((w) => '⚠ ' + w)];
+    modal(`Converted: ${rep.from} → ${rep.to}`, `<ul>${lines.map((l) => `<li>${esc(l)}</li>`).join('') || '<li>No artwork changes were needed.</li>'}</ul><p>${rep.relabelled.length} panel label(s) changed (see <b>Change log</b>). ${JN.rulesFor(S.doc).verified ? '' : '<b>The new journal\'s rules are unverified.</b> '}Next: <b>Check rules</b>, and <b>Auto-arrange</b> if panels now crowd.</p>`);
+  }, 'Convert');
+  const warn = () => { const r = JN.JOURNALS[$('#sj-to').value]; $('#sj-warn').textContent = r && !r.verified ? `⚠ ${r.name} rules are unverified (search-summary values). Check them in “Edit rules” after converting.` : ''; };
+  $('#sj-to').addEventListener('change', warn); $('#sj-to').value = JN.JOURNAL_KEYS.find((k) => k !== cur && k !== 'lab') || 'lab'; warn();
+}
+function showPreflight() {
+  const out = JN.preflight(S.doc); const JR = JN.rulesFor(S.doc);
+  const icon = { error: '✖', warn: '⚠', info: 'ℹ', ok: '✔' };
+  modal(`Check against ${JR.name}`, `<ul style="list-style:none;padding-left:0">${out.map((x) => `<li>${icon[x.level]} ${x.page != null ? `<b>${esc(PN.figureInfo(S.doc)[x.page].name)}</b>: ` : ''}${esc(x.msg)}${x.ids.length ? ` <a href="#" class="pf-sel" data-page="${x.page}" data-ids="${x.ids.join(',')}">select</a>` : ''}</li>`).join('')}</ul>`);
+}
+$('#modal .body').addEventListener('click', (e) => {
+  const a = e.target.closest('.pf-sel'); if (!a) return; e.preventDefault();
+  $('#modal').hidden = true; S.page = +a.dataset.page; renderAll(); refreshPages(); select(a.dataset.ids.split(','));
+});
+function editRulesDialog() {
+  const key = S.doc.settings.journal || 'lab'; const R = JN.rulesFor(S.doc, key); const nv = (v) => (v ?? '');
+  const num = (id, v, step = '0.5') => `<input type="number" id="${id}" value="${nv(v)}" step="${step}" placeholder="none">`;
+  modal(`Rules for ${R.name}`, `<p class="dim">${key === 'lab' ? 'Your lab conventions.' : 'These numbers came from <b>search summaries</b>, not the journal pages. Compare each against the journal\'s current instructions, correct them, then tick the box at the bottom.'}</p>
+    <div class="row"><label>Widths mm</label>${num('er-w1', R.widthsMm.single)}${num('er-w2', R.widthsMm.onehalf)}${num('er-w3', R.widthsMm.double)}</div><div class="dim" style="margin:-2px 0 4px 64px">single · 1.5 column · double/full</div>
+    <div class="row"><label>Max height</label>${num('er-h', R.maxHeightMm)}<span class="dim">mm</span></div>
+    <div class="row"><label>Letters</label><select id="er-lc"><option value="lower" ${R.letter.case === 'lower' ? 'selected' : ''}>a, b, c</option><option value="upper" ${R.letter.case === 'upper' ? 'selected' : ''}>A, B, C</option></select>${num('er-ls', R.letter.size)}<label style="width:auto"><input type="checkbox" id="er-lb" ${R.letter.bold ? 'checked' : ''}> bold</label><span class="dim">pt</span></div>
+    <div class="row"><label>Text pt</label>${num('er-t1', R.text.minPt)}${num('er-t2', R.text.maxPt)}<span class="dim">min · max</span></div>
+    <div class="row"><label>Min line</label>${num('er-ml', R.minLinePt, '0.05')}<span class="dim">pt</span></div>
+    <div class="row"><label>Names</label><input type="text" id="er-n1" value="${esc(R.names.main)}" title="main figure prefix"><input type="text" id="er-n2" value="${esc(R.names.supp)}" title="supplementary prefix"><input type="text" id="er-n3" value="${esc(R.names.ed)}" title="extended data prefix"></div><div class="dim" style="margin:-2px 0 4px 64px">prefix + number: “Fig. ” → Fig. 1; “Figure S” → Figure S1</div>
+    ${Object.keys(R.sources).length ? `<details><summary>Where these values came from</summary><ul>${Object.entries(R.sources).map(([k, v]) => `<li><b>${esc(k)}</b>: ${esc(v)}</li>`).join('')}</ul>${R.alt.length ? `<b>Conflicting / alternative values found:</b><ul>${R.alt.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>` : ''}${R.notes.map((n) => `<div class="warn">${esc(n)}</div>`).join('')}</details>` : ''}
+    ${key === 'lab' ? '' : `<div class="row"><label></label><label style="width:auto"><input type="checkbox" id="er-ok" ${R.verified ? 'checked' : ''}> I checked these against ${esc(R.name)}'s current instructions</label></div>`}`, () => {
+    const g = (id) => { const v = parseFloat($('#' + id).value); return Number.isFinite(v) ? v : null; };
+    mutate(() => {
+      S.doc.settings.journalOverrides ??= {}; S.doc.settings.journalChecked ??= {};
+      S.doc.settings.journalOverrides[key] = { widthsMm: { single: g('er-w1'), onehalf: g('er-w2'), double: g('er-w3') }, maxHeightMm: g('er-h'), letter: { case: $('#er-lc').value, bold: $('#er-lb').checked, size: g('er-ls') ?? 8 }, text: { minPt: g('er-t1'), maxPt: g('er-t2') }, minLinePt: g('er-ml'), names: { main: $('#er-n1').value, supp: $('#er-n2').value, ed: $('#er-n3').value }, fileNames: { ...R.fileNames, main: R.fileNames.main } };
+      if ($('#er-ok')) S.doc.settings.journalChecked[key] = $('#er-ok').checked;
+      const before = PN.labelMap(S.doc); JN.applyJournalSettings(S.doc, key); const r = PN.applyLabels(S.doc);
+      for (const o of S.doc.pages.flatMap((p) => p.objects)) if (o.type === 'text' && o.role === 'label') { o.size = JN.rulesFor(S.doc).letter.size; o.bold = JN.rulesFor(S.doc).letter.bold; o.m = [1, 0, 0, -1, o.m[4], o.m[5]]; delete o.origW; }
+      S.doc.pages.forEach((pg, pi) => PN.orderedPanels(S.doc, pi).forEach((id) => PN.placeLabel(S.doc, pi, id, S.doc.settings.layout.labelOffset)));
+      if (r.changes.length) S.changeLog.unshift({ t: Date.now(), changes: r.changes });
+    });
+  }, 'Save rules');
+}
+
 // ---------- reports & exports ----------
 function showChangeLog() {
   const html = S.changeLog.length ? S.changeLog.map((c) => `<p><b>${new Date(c.t).toLocaleTimeString()}</b></p><ul>${c.changes.map((x) => `<li>${esc(x.name)}: <b>${esc(x.from)}</b> → <b>${esc(x.to)}</b></li>`).join('')}</ul>`).join('')
@@ -990,4 +1055,4 @@ document.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key ==
 
 // boot
 S._before = snapshot(); syncButtons(); setTool('select'); refreshPages(); renderAll();
-window.__api = { PN, LY, placeFiles, applyUpdate, groupSel, doArrange, alignSel, relabel, exportFigures, checkFolder: (dir) => checkFolder(dir, S.doc, (id, b, sc) => applyUpdate(id, b, sc, ' (folder watch)')), loadDoc, doOpen, save, docToPdf: () => docToPdf(S.doc), select, setTool, fit, renderAll, objBBox, selBBox };
+window.__api = { PN, LY, JN, placeFiles, applyUpdate, groupSel, doArrange, alignSel, relabel, exportFigures, checkFolder: (dir) => checkFolder(dir, S.doc, (id, b, sc) => applyUpdate(id, b, sc, ' (folder watch)')), loadDoc, doOpen, save, docToPdf: () => docToPdf(S.doc), select, setTool, fit, renderAll, objBBox, selBBox };
