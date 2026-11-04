@@ -1,0 +1,16 @@
+name: Build Pomo.app
+on:
+  push:
+    paths: ["pomodoro-menubar/**", ".github/workflows/pomo.yml"]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with: { lfs: false }
+      - run: ./pomodoro-menubar/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Pomo-app
+          path: pomodoro-menubar/build/Pomo.zip
