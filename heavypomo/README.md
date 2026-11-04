@@ -2,7 +2,7 @@
 
 A separate, sandboxed app (no network) that plans your day and hands it to Pomo.
 
-- **Doesn't start with your Mac by default.** Open it yourself; the morning prompt and the automatic summary only happen while it's running. To auto-start later: HeavyPomo menu (in the menu bar while its window is open) → **Launch at Login**.
+- **Doesn't start with your Mac by default.** Open it yourself; the morning prompt and the automatic summary only happen while it's running. To auto-start later, tick **Launch at Login** at the top of its window.
 - **Morning prompt:** the first time your Mac is in use after 5:00 each day, the planner window opens. Closing it or pressing "Skip Today" stops it from asking again until tomorrow. To open it any time: Pomo menu → **Plan My Day…**, or open the app again.
 - **Each task:** a title, an **Urgent** slider and an **Important** slider (0–10), and how many 🍅 sessions it needs.
 - **Ranking:** score = 0.6 × Important + 0.4 × Urgent, so importance counts more. Each task shows its Eisenhower label: Do first, Schedule, Quick / delegate, or Maybe drop.

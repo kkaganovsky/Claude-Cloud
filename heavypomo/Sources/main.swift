@@ -608,15 +608,25 @@ struct RootView: View {
     @ObservedObject var store: PlanStore
     var onSend: () -> Void
     var onSkip: () -> Void
+    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Picker("", selection: $store.tab) {
-                Text("Today").tag(0)
-                Text("Projects").tag(1)
-                Text("Summary").tag(2)
+            HStack {
+                Picker("", selection: $store.tab) {
+                    Text("Today").tag(0)
+                    Text("Projects").tag(1)
+                    Text("Summary").tag(2)
+                }
+                .pickerStyle(.segmented).labelsHidden()
+                Toggle("Launch at Login", isOn: $launchAtLogin)
+                    .toggleStyle(.checkbox).fixedSize()
+                    .onChange(of: launchAtLogin) { on in
+                        let svc = SMAppService.mainApp
+                        if on { try? svc.register() } else { try? svc.unregister() }
+                        launchAtLogin = svc.status == .enabled
+                    }
             }
-            .pickerStyle(.segmented).labelsHidden()
 
             switch store.tab {
             case 1: ProjectsView(store: store)
@@ -646,7 +656,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationDidFinishLaunching(_ note: Notification) {
         installMainMenu()
-        // Not registered as a login item by default; opt in via HeavyPomo menu → Launch at Login.
+        // Not registered as a login item by default; opt in with the "Launch at Login" checkbox in the window.
         let ws = NSWorkspace.shared.notificationCenter
         ws.addObserver(self, selector: #selector(checkTime), name: NSWorkspace.didWakeNotification, object: nil)
         ws.addObserver(self, selector: #selector(checkTime), name: NSWorkspace.screensDidWakeNotification, object: nil)
@@ -762,27 +772,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window?.close()
     }
 
-    @objc private func toggleLogin(_ sender: NSMenuItem) {
-        let svc = SMAppService.mainApp
-        do {
-            if svc.status == .enabled { try svc.unregister() } else { try svc.register() }
-        } catch {
-            let a = NSAlert()
-            a.messageText = "Couldn't change Login Item"
-            a.informativeText = error.localizedDescription
-            a.runModal()
-        }
-        sender.state = svc.status == .enabled ? .on : .off
-    }
-
     private func installMainMenu() {
         let main = NSMenu()
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
-        let login = appMenu.addItem(withTitle: "Launch at Login", action: #selector(toggleLogin(_:)), keyEquivalent: "")
-        login.target = self
-        login.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit HeavyPomo", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         main.addItem(appItem)
