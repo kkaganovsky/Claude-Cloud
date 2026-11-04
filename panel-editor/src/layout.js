@@ -86,3 +86,33 @@ export function applyMoves(doc, pi, moves, L = layoutOf(doc)) {
   for (const id of Object.keys(moves)) placeLabel(doc, pi, id, L.labelOffset);
 }
 export const arrange = (doc, pi, L = layoutOf(doc)) => { const plan = planArrange(doc, pi, L); applyMoves(doc, pi, plan.moves, L); return plan; };
+
+// Where a NEW panel of size w×h should go without disturbing the panels already placed:
+// to the right of the last panel in the bottom row (on the next column start) if it fits, otherwise a new row.
+export function nextSlot(doc, pi, w, h, L = layoutOf(doc)) {
+  const page = doc.pages[pi]; const grid = gridLines(page, L); const extra = Math.max(0, -(L.labelOffset?.[1] || 0));
+  const ids = orderedPanels(doc, pi); const frames = ids.map((id) => panelFrame(page, id)).filter(Boolean);
+  if (!frames.length) return [grid.left, L.margin + extra];
+  const bottom = Math.max(...frames.map((f) => f[3]));
+  const rowTol = settings(doc).rowTol;
+  const lastTop = Math.max(...frames.map((f) => f[1]));
+  const row = frames.filter((f) => Math.abs(f[1] - lastTop) <= rowTol);
+  const right = Math.max(...row.map((f) => f[2]));
+  let x = right + L.gutter;
+  if (L.colSnap) { const starts = grid.x.filter((_, i) => i % 2 === 0); x = starts.find((c) => c >= x - 1e-6) ?? x; }
+  if (x + w <= grid.right + 0.5) return [x, Math.min(...row.map((f) => f[1]))];
+  return [grid.left, bottom + L.rowGap + extra];
+}
+
+// A plot got wider/narrower by dx: shift the panels to its right in the same row so nothing overlaps,
+// leaving every other panel where it is. `oldRight` is the plot's right edge before the change.
+export function pushRow(doc, pi, id, oldRight, dx, L = layoutOf(doc)) {
+  if (Math.abs(dx) < 1e-6) return [];
+  const page = doc.pages[pi]; const mine = panelFrame(page, id); const tol = settings(doc).rowTol; const moved = [];
+  for (const other of orderedPanels(doc, pi)) {
+    if (other === id) continue; const f = panelFrame(page, other);
+    if (f && Math.abs(f[1] - mine[1]) <= tol && f[0] >= oldRight - 0.5) { for (const o of panelObjects(page, other)) transformObject(o, translate(dx, 0)); moved.push(other); }
+  }
+  for (const m of moved) placeLabel(doc, pi, m, L.labelOffset);
+  return moved;
+}

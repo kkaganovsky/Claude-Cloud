@@ -130,3 +130,18 @@ test('zip is valid (checked with unzip -t) and crc32 matches the standard vector
   fs.writeFileSync(tmp, zip([{ name: 'Figure 1.ai', data: new Uint8Array([37, 80, 68, 70]) }, { name: 'Supplementary Figure 1.ai', data: new TextEncoder().encode('x'.repeat(1000)) }, { name: 'α.csv', data: new Uint8Array(0) }]));
   try { const out = execSync(`unzip -t "${tmp}"`).toString(); assert.match(out, /No errors detected/); } catch (e) { if (!/not found/.test(String(e))) throw e; }
 });
+
+test('nextSlot appends to the bottom row or wraps, without moving anything', () => {
+  const d = fresh(); const Lc = L.layoutOf(d); const g = L.gridLines(d.pages[0], Lc);
+  assert.deepEqual(L.nextSlot(d, 0, 60, 93.6, Lc), [g.left, Lc.margin + 10]);
+  addPanel(d, 0, g.left, Lc.margin + 10, 60, 93.6, 'A');
+  const s2 = L.nextSlot(d, 0, 60, 93.6, Lc);
+  assert.ok(s2[0] >= g.left + 60 + Lc.gutter - 1e-6 && g.x.some((c, i) => i % 2 === 0 && Math.abs(c - s2[0]) < 1e-6) && Math.abs(s2[1] - (Lc.margin + 10)) < 1e-6, 'same row, on a column start');
+  const wide = L.nextSlot(d, 0, 500, 93.6, Lc); assert.ok(Math.abs(wide[0] - g.left) < 1e-6 && wide[1] > Lc.margin + 10 + 93.6, 'too wide -> new row');
+});
+test('pushRow shifts only the right-hand neighbours in the same row', () => {
+  const d = fresh(); const a = addPanel(d, 0, 40, 60, 60, 90, 'A'), b = addPanel(d, 0, 120, 60, 60, 90, 'B'), c = addPanel(d, 0, 40, 260, 60, 90, 'C');
+  P.applyLabels(d); const pg = d.pages[0]; const bx = P.panelFrame(pg, b)[0], cx = P.panelFrame(pg, c)[0];
+  const moved = L.pushRow(d, 0, a, 100, 10); assert.deepEqual(moved, [b]);
+  assert.equal(P.panelFrame(pg, b)[0], bx + 10); assert.equal(P.panelFrame(pg, c)[0], cx);
+});

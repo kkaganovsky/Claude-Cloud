@@ -1,0 +1,13 @@
+{
+  "plots_dir": "plots",
+  "plotsuite": "plotsuite-plot",
+  "preset": "Xenocortical Nature style",
+  "panels": [
+    {"id": "cells", "data": "data/cells.csv",
+     "args": ["--groups", "Control,Treated", "--test", "unpaired_t", "--opt", "group_a=Control", "group_b=Treated",
+              "--set", "y_label=Cells per mm2", "y_min=0"]},
+    {"id": "ephys", "data": "data/ephys.csv",
+     "args": ["--groups", "WT,KO,Rescue", "--test", "oneway_anova", "--opt", "posthoc=tukey",
+              "--set", "y_label=Amplitude (pA)", "y_min=0"]}
+  ]
+}

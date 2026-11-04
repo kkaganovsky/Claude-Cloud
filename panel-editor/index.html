@@ -29,8 +29,9 @@
   <span class="sep"></span>
   <button id="z-out">−</button><span id="zoom-label">100%</span><button id="z-in">+</button><button id="z-fit" title="Fit artboard (Ctrl+0)">Fit</button>
   <span class="grow"></span>
-  <label>Artboard <select id="page-select"></select></label>
-  <button id="btn-addpage" title="Add artboard">+</button>
+  <button id="btn-help" title="Quick start">? Help</button>
+  <label>Figure <select id="page-select"></select></label>
+  <button id="btn-addpage" title="Add a figure (artboard)">+</button>
   <span id="docname" class="docname"></span>
   <input id="file-input" type="file" accept=".ai,.pdf,application/pdf,application/illustrator" hidden>
   <input id="img-input" type="file" accept="image/png,image/jpeg" hidden>
@@ -39,7 +40,7 @@
 </header>
 <aside id="tools"></aside>
 <main id="stage"><div id="board"><div id="page-host"></div><svg id="overlay" xmlns="http://www.w3.org/2000/svg"></svg><textarea id="text-edit" hidden spellcheck="false"></textarea></div>
-  <div id="welcome"><h2>Panel Editor</h2><p>Drop an Illustrator <b>.ai</b> file (or a PDF) here, or press <b>Open…</b>.<br>Everything stays on your computer — nothing is uploaded.</p></div>
+  <div id="welcome"><h2>Panel Editor</h2><p>Drop an Illustrator <b>.ai</b> file (or a PDF) here, or start a new figure project.<br>Everything stays on your computer — nothing is uploaded.</p><p><button id="w-new" class="primary">New figure project</button> <button id="w-open">Open…</button> <button id="w-help">Quick start</button></p></div>
 </main>
 <aside id="side">
   <section id="props"></section>
@@ -47,7 +48,7 @@
   <section id="layers"></section>
 </aside>
 <footer id="status"><span id="status-msg">Ready</span><span class="grow"></span><button id="btn-warn" hidden></button><span id="status-xy"></span></footer>
-<div id="modal" hidden><div class="card"><h3></h3><div class="body"></div><button class="close primary">OK</button></div></div>
+<div id="modal" hidden><div class="card"><h3></h3><div class="body"></div><div class="mbtns"><button class="cancel" hidden>Cancel</button><button class="close primary">OK</button></div></div></div>
 <script type="module" src="/src/main.js"></script>
 </body>
 </html>

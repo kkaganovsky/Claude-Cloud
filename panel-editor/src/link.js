@@ -29,9 +29,10 @@ export function cleanSidecar(raw) {
   return keep;
 }
 
-export async function placePlot(doc, pi, bytes, { name, src, sidecar = {}, at, layer, panelName }) {
+export async function placePlot(doc, pi, bytes, { name, src, sidecar = {}, at: atOpt, layer, panelName }) {
   ensure(doc); const page = doc.pages[pi];
   const { objs, w, h, warnings } = await readPlot(bytes, name || src);
+  const at = typeof atOpt === 'function' ? atOpt(w, h) : atOpt; // a function lets the caller pick a free slot once the plot's size is known
   for (const o of objs) { o.layer = layer; transformObject(o, translate(at[0], at[1])); }
   page.objects.push(...objs);
   const link = { src: src || name, hash: await sha256(bytes), frame: [w, h], placedAt: Date.now(), ...cleanSidecar(sidecar) };
@@ -54,7 +55,7 @@ export async function refreshPlot(doc, id, bytes, { name, sidecar = {} } = {}) {
   page.objects.splice(Math.max(0, idx), 0, ...objs);
   const oldW = f0[2] - f0[0];
   p.link = { ...link, hash: await sha256(bytes), frame: [w, h], updatedAt: Date.now(), ...cleanSidecar(sidecar) };
-  return { widthBefore: oldW, widthAfter: w * s, warnings, overlaps: overlapsFor(doc, pi, id) };
+  return { widthBefore: oldW, widthAfter: w * s, oldRight: f0[2], warnings, overlaps: overlapsFor(doc, pi, id) };
 }
 
 // other panels whose frame intersects this one

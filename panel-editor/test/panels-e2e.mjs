@@ -74,6 +74,8 @@ P = await panels();
 ok(P.find((q) => q.id === cellsId).label === 'Fig. 1b' && P.find((q) => q.id === ephysId).label === 'Fig. 1a', 'letters swapped automatically', JSON.stringify(P.map((q) => [q.name, q.label])));
 ok((await legend()).str === 'Cell counts, see Fig. 1b', 'reference in the legend updated to Fig. 1b');
 ok(await ev(() => __app.changeLog[0]?.changes.length === 2), 'change log lists both relabels');
+ok(await ev(() => [...document.querySelectorAll('#panels .prow')].every((r) => r.querySelector('.lt').textContent === (__app.doc.panels[r.dataset.pid].letter || '·'))), 'sidebar panel list shows the same letters as the canvas right after a drag');
+ok(await ev(() => !document.querySelector('#props [data-k="fill"]') && /Whole panel selected/.test(document.querySelector('#props').textContent)), 'with a whole panel selected, Fill/Stroke are hidden (no accidental recolouring of every bar)');
 ok(await ev(() => __app.doc.pages[0].objects.filter((o) => o.role === 'label').every((o) => (o.panel === __app.doc.panels[o.panel]?.id) && o.str === __app.doc.panels[o.panel].letter)), 'letter objects match registry');
 await p.click('#btn-undo'); await p.waitForTimeout(200);
 ok((await panels()).find((q) => q.id === cellsId).label === 'Fig. 1a' && (await legend()).str === 'Cell counts, see Fig. 1a', 'undo restores letters AND references together');
@@ -156,6 +158,56 @@ await p.check('#chk-grid'); await p.waitForTimeout(100);
 ok((await ev(() => document.querySelectorAll('#overlay line').length)) >= 24, 'grid lines drawn (12 columns × 2 edges)');
 await p.uncheck('#chk-grid');
 
+console.log('Friendlier workflow: nothing you arranged gets disturbed');
+await p.evaluate(() => __api.fit?.());
+await p.click('#btn-undo'); await p.click('#btn-undo'); await p.click('#btn-undo').catch(() => {}); // (back to a clean two-panel state is not required; we re-arrange)
+await p.click('#panels [data-act="arrange"]'); await p.waitForTimeout(200);
+await dragPt([(fe3[0] + fe3[2]) / 2, (fe3[1] + fe3[3]) / 2 + 80], [(fe3[0] + fe3[2]) / 2, (fe3[1] + fe3[3]) / 2 + 80]).catch(() => {});
+const hand = await frame(ephysId);
+await ev(() => { __app.snap = false; });
+await dragPt([(hand[0] + hand[2]) / 2, (hand[1] + hand[3]) / 2], [(hand[0] + hand[2]) / 2 + 3, (hand[1] + hand[3]) / 2 + 17]); await p.waitForTimeout(100);
+await ev(() => { __app.snap = true; });
+const tuned = [await frame(cellsId), await frame(ephysId)];
+ok(!near(tuned[1][1], tuned[0][1], 1), 'precondition: ephys was nudged off the grid by hand');
+const nPanelsBefore = (await panels()).length;
+await p.evaluate(async (bytes) => { const dt = new DataTransfer(); dt.items.add(new File([new Uint8Array(bytes)], 'third.pdf', { type: 'application/pdf' })); window.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true })); }, bytes(V1 + '/ephys.pdf'));
+await p.waitForFunction((n) => Object.keys(__app.doc.panels).length === n + 1, nPanelsBefore, { timeout: 20000 }); await p.waitForTimeout(300);
+ok(await ev(() => __app.doc.pages[__app.page].objects.some((o) => o.panel && __app.doc.panels[o.panel].name === 'third')), 'dropping a PDF on an open project PLACES it (does not replace the document)');
+const kept = [await frame(cellsId), await frame(ephysId)];
+ok(kept.every((f, i) => f.every((v, j) => near(v, tuned[i][j], 1e-6))), 'existing hand-tuned panels did not move when a plot was added');
+const third = (await byName('third')).id; const ft = await frame(third); const allF = await Promise.all((await panels()).map((q) => frame(q.id)));
+const clash = allF.some((a, i) => allF.some((b, j) => i < j && !(a[2] <= b[0] + 1e-6 || b[2] <= a[0] + 1e-6 || a[3] <= b[1] + 1e-6 || b[3] <= a[1] + 1e-6)));
+ok(!clash, 'new plot landed in free space (no overlaps)');
+// push-aside on update: widen cells (v2) with a neighbour to its right on the same row
+const row = (await panels()).map(async (q) => [q.id, await frame(q.id)]);
+await ev((id) => { __app.updateTarget = id; }, cellsId);
+await p.setInputFiles('#update-input', [V1 + '/cells.pdf', V1 + '/cells.json']); await p.waitForTimeout(600);
+const nBefore = (await panels()).length;
+ok(nBefore === nPanelsBefore + 1, 'updating a plot keeps the panel count');
+
+console.log('Figure management');
+await ev(() => { __app.page = 0; __api.renderAll(); });
+const names0 = await ev(() => [...document.querySelectorAll('#page-select option')].map((o) => o.textContent));
+ok(names0[0] === 'Fig. 1' && names0.at(-1).startsWith('Supplementary Fig. 1'), 'figure picker shows figure names, not "1 (612×792)"', names0.join('|'));
+await p.click('#panels [data-act="addfig-ed"]'); await p.waitForTimeout(200);
+ok((await ev(() => [...document.querySelectorAll('#page-select option')].map((o) => o.textContent))).includes('Extended Data Fig. 1'), '+ Extended Data adds a figure and selects it');
+await p.click('#panels [data-act="figleft"]'); await p.waitForTimeout(200);
+ok(await ev(() => __app.page) === 2 && (await ev(() => __app.doc.pages[2].fig.kind)) === 'ed', 'figure can be moved earlier (and stays selected)');
+await p.click('#panels [data-act="figdel"]'); await p.waitForTimeout(200);
+ok((await ev(() => __app.doc.pages.length)) === 3, 'figure can be deleted (empty one needs no confirmation)');
+await ev(() => { __app.page = 0; __api.renderAll(); });
+const labelsBefore = await ev(() => JSON.stringify(Object.values(__app.doc.panels).map((q) => [q.name, q.label]).sort()));
+await ev(() => { __app.doc.pages.unshift({ w: 612, h: 792, objects: [], fig: { kind: 'main', title: '' } }); __app.page = 1; __api.relabel(); __api.renderAll(); });
+const labelsAfter = await ev(() => JSON.stringify(Object.values(__app.doc.panels).map((q) => [q.name, q.label]).sort()));
+ok(labelsBefore !== labelsAfter && labelsAfter.includes('Fig. 2'), 'inserting a figure before renumbers existing figures (Fig. 1 → Fig. 2)');
+await ev(() => { __app.doc.pages.shift(); __app.page = 0; __api.relabel(); __api.renderAll(); });
+
+console.log('Placed image becomes a panel');
+const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+await p.setInputFiles('#img-input', { name: 'micro.png', mimeType: 'image/png', buffer: png }); await p.waitForTimeout(600);
+const mic = await byName('micro');
+ok(mic && mic.letter !== undefined && mic.label.startsWith('Fig. 1'), 'a placed image is a lettered panel', JSON.stringify(mic));
+
 console.log('Export figures + panel map');
 await ev((id) => __api.PN.movePanelToPage(__app.doc, id, 2), ephysId); await ev(() => __api.relabel()); // supplementary, so we get a mixed set
 const [dl] = await Promise.all([p.waitForEvent('download'), p.click('#panels [data-act="exportfigs"]')]);
@@ -179,6 +231,12 @@ const [dl2] = await Promise.all([p.waitForEvent('download'), p.click('#btn-save'
 const snapshot = await ev(() => JSON.stringify(Object.values(__app.doc.panels).map((q) => [q.id, q.label, !!q.link?.hash, q.link?.stats?.length > 10]).sort()));
 await p.setInputFiles('#file-input', aif); await p.waitForTimeout(2500);
 ok((await ev(() => !!__app.doc.meta.restored)) && (await ev(() => JSON.stringify(Object.values(__app.doc.panels).map((q) => [q.id, q.label, !!q.link?.hash, q.link?.stats?.length > 10]).sort()))) === snapshot, 'reopened file restores panel registry, links and labels');
+console.log('New project dialog');
+p.once('dialog', (d) => d.accept());
+await p.click('#btn-new'); await p.waitForSelector('#np-size');
+await p.fill('#np-name', 'My paper'); await p.selectOption('#np-size', 'A4, landscape'); await p.click('#modal .close'); await p.waitForTimeout(300);
+ok((await ev(() => [__app.doc.name, Math.round(__app.doc.pages[0].w)])).join() === 'My paper,842', 'New project: name + page-size preset (no raw prompts)');
+
 ok(errors.length === 0, 'no uncaught page errors', errors.join(' | '));
 await browser.close(); await server.close();
 console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

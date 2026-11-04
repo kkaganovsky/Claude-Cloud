@@ -4,6 +4,8 @@ A free, open-source, **browser-based** editor for Adobe Illustrator `.ai` files,
 without Illustrator can open a figure, add or adjust panels, and send the file back.
 Files are processed entirely in the browser — nothing is uploaded.
 
+**New here? Follow the [step-by-step tutorial](docs/TUTORIAL.md)** (data → plots → numbered, aligned, self-updating figure; ~20 min, example files in `examples/tutorial/`).
+
 > **Read "What it is and isn't" before relying on it.** It edits the *vector content* of an `.ai` file.
 > It is not a clone of Illustrator, and it cannot write Illustrator's proprietary native data.
 
@@ -116,7 +118,7 @@ subsetted Liberation fonts). `src/main.js` is the editor UI.
 ```bash
 npm run build
 npm i -D playwright && npx playwright install chromium   # once
-npm test          # unit (12) + UI e2e (37) + figure-workflow e2e (42, uses real plotsuite output fixtures)
+npm test          # unit (14) + UI e2e (37) + figure-workflow e2e (56, uses real plotsuite output fixtures)
 ```
 
 `test/make_fixture.py` (reportlab) generates an independent `.ai`-style fixture with gradients, a clip, dashes,

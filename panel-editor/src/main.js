@@ -7,7 +7,7 @@ import { openFile } from './import.js';
 import { docToPdf, pickFont } from './export.js';
 import * as PN from './panels.js';
 import * as LY from './layout.js';
-import { placePlot, refreshPlot, checkFolder, stem } from './link.js';
+import { placePlot, refreshPlot, checkFolder, stem, overlapsFor } from './link.js';
 import { objBounds } from './geom.js';
 import { zip } from './zip.js';
 
@@ -16,10 +16,12 @@ const S = {
   doc: newDoc(), page: 0, sel: new Set(), tool: 'select', zoom: 1, activeLayer: null,
   style: { fill: '#dddddd', stroke: '#000000', sw: 1 },
   undo: [], redo: [], dirty: false, fileHandle: null, hasDoc: false,
-  snap: true, showGrid: false, changeLog: [], dir: null, watching: false, guides: [], arrangeOnPlace: true, notes: [],
+  snap: true, showGrid: false, changeLog: [], dir: null, watching: false, guides: [], arrangeOnPlace: false, notes: [],
 };
 window.__app = S; // handy for tests / debugging
 
+// checkboxes / buttons keep focus after a click; they must not swallow the single-key tool shortcuts
+const isTyping = () => { const a = document.activeElement; return !!a && (a.tagName === 'TEXTAREA' || a.tagName === 'SELECT' || (a.tagName === 'INPUT' && !/^(checkbox|radio|button|range|color|file)$/.test(a.type))); };
 const pageObjs = () => S.doc.pages[S.page].objects;
 const byId = (id) => pageObjs().find((o) => o.id === id);
 const selObjs = () => [...S.sel].map(byId).filter(Boolean);
@@ -39,7 +41,8 @@ function relabel() {
 function commit() { // call AFTER a mutation
   relabel();
   S.undo.push(S._before); if (S.undo.length > 60) S.undo.shift();
-  S.redo = []; S.dirty = true; S._before = snapshot(); syncButtons();
+  S.redo = []; S.dirty = true; S._before = snapshot(); syncButtons(); refreshPages();
+  if (!document.activeElement?.closest?.('#panels')) renderPanels(); // keep the letters in the sidebar in step with the canvas
 }
 function restore(json) {
   const { d, p } = JSON.parse(json);
@@ -492,8 +495,11 @@ function renderProps() {
       <label style="width:auto"><input type="checkbox" data-none="${key}" ${none ? 'checked' : ''}> none</label>
       ${isGrad ? `<span class="dim">gradient</span><button data-act="flat-${key}">Flatten</button>` : ''}</div>`;
   };
-  let h = `<h4>${objs.length ? objs.length + ' selected' : 'Defaults for new shapes'}</h4>`;
-  if (!objs.length || objs.some((o) => o.type !== 'image')) {
+  const pids = [...new Set(objs.map((o) => o.panel).filter(Boolean))]; const inPanel = pids.length > 0;
+  const title = !objs.length ? 'Defaults for new shapes' : pids.length === 1 && objs.every((o) => o.panel === pids[0]) ? `Panel “${S.doc.panels[pids[0]]?.name}” ${S.doc.panels[pids[0]]?.label ? '(' + S.doc.panels[pids[0]].label + ')' : ''}` : `${objs.length} selected`;
+  let h = `<h4>${esc(title)}</h4>`;
+  if (inPanel) h += '<div class="dim" style="font-size:12px;margin-bottom:6px">Whole panel selected: move, resize or align it. <b>Alt-click</b> an object inside to restyle just that object.</div>';
+  if (!inPanel && (!objs.length || objs.some((o) => o.type !== 'image'))) {
     h += st('Fill', 'fill') + st('Stroke', 'stroke');
     h += `<div class="row"><label>Stroke wt</label><input type="number" min="0" step="0.25" data-k="sw" value="${+((objs[0]?.sw ?? S.style.sw)).toFixed(3)}"></div>`;
   }
@@ -631,7 +637,7 @@ function setTool(t) {
 }
 let spaceDown = false;
 window.addEventListener('keydown', (e) => {
-  const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName);
+  const typing = isTyping();
   const mod = e.metaKey || e.ctrlKey;
   if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); save(); return; }
   if (mod && e.key.toLowerCase() === 'o') { e.preventDefault(); $('#file-input').click(); return; }
@@ -661,11 +667,14 @@ window.addEventListener('keyup', (e) => { if (e.key === ' ') { spaceDown = false
 // ---------- pages ----------
 function refreshPages() {
   const sel = $('#page-select');
-  sel.innerHTML = S.doc.pages.map((p, i) => `<option value="${i}" ${i === S.page ? 'selected' : ''}>${i + 1} (${Math.round(p.w)}×${Math.round(p.h)})</option>`).join('');
+  sel.innerHTML = PN.figureInfo(S.doc).map((f) => `<option value="${f.page}" ${f.page === S.page ? 'selected' : ''}>${esc(f.name)}${f.title ? ' — ' + esc(f.title) : ''}</option>`).join('');
   $('#docname').textContent = S.doc.name + (S.dirty ? ' •' : '');
 }
 $('#page-select').addEventListener('change', (e) => { S.page = +e.target.value; S.sel = new Set(); fit(); });
-$('#btn-addpage').addEventListener('click', () => { const P = S.doc.pages[S.page]; S._before ??= snapshot(); S.doc.pages.push({ w: P.w, h: P.h, objects: [] }); S.page = S.doc.pages.length - 1; commit(); refreshPages(); fit(); });
+function addFigure(kind) { if (!S.hasDoc) return; const P = S.doc.pages[S.page]; S._before ??= snapshot(); S.doc.pages.push({ w: P.w, h: P.h, objects: [], fig: { kind: kind || P.fig?.kind || 'main', title: '' } }); S.page = S.doc.pages.length - 1; S.sel = new Set(); commit(); fit(); status(`Added ${PN.figureInfo(S.doc)[S.page].name}`); }
+$('#btn-addpage').addEventListener('click', () => addFigure());
+function moveFigure(d) { const j = S.page + d; if (j < 0 || j >= S.doc.pages.length) return; S._before ??= snapshot(); const a = S.doc.pages; [a[S.page], a[j]] = [a[j], a[S.page]]; S.page = j; S.sel = new Set(); commit(); renderAll(); status('Figure moved — every figure number, letter and reference was renumbered'); }
+function deleteFigure() { if (S.doc.pages.length < 2) return status('A project needs at least one figure'); const n = S.doc.pages[S.page].objects.length; if (n && !confirm(`Delete ${PN.figureInfo(S.doc)[S.page].name} and its ${n} objects? (Ctrl+Z undoes this)`)) return; S._before ??= snapshot(); S.doc.pages.splice(S.page, 1); S.page = Math.min(S.page, S.doc.pages.length - 1); S.sel = new Set(); commit(); fit(); }
 
 // ---------- file I/O ----------
 function loadDoc(doc) {
@@ -678,19 +687,37 @@ function loadDoc(doc) {
   status(`Opened “${doc.name}” — ${doc.pages.length} artboard(s), ${doc.layers.length} layer(s), ${n} objects${doc.meta?.restored ? ' (restored full edit state)' : ''}`);
 }
 async function doOpen(file) {
+  if (S.hasDoc && S.dirty && !confirm('You have unsaved changes. Discard them and open this file?')) return;
   try { status('Opening…'); loadDoc(await openFile(file, status)); }
   catch (err) { console.error(err); modal('Could not open file', `<p>${String(err.message || err).replace(/</g, '&lt;')}</p>`); status('Open failed'); }
 }
 $('#btn-open').addEventListener('click', () => $('#file-input').click());
 $('#file-input').addEventListener('change', (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) doOpen(f); });
-$('#btn-new').addEventListener('click', () => {
+const SIZES = { 'US Letter, portrait': [612, 792], 'US Letter, landscape': [792, 612], 'A4, portrait': [595.28, 841.89], 'A4, landscape': [841.89, 595.28], 'Custom…': null };
+function newProject() {
   if (S.dirty && !confirm('Discard unsaved changes?')) return;
-  const w = parseFloat(prompt('Artboard width (pt)', '612')) || 612, h = parseFloat(prompt('Artboard height (pt)', '792')) || 792;
-  loadDoc(newDoc(w, h)); S.hasDoc = true; renderAll();
-});
+  modal('New figure project', `<div class="row"><label>Name</label><input type="text" id="np-name" value="Figures"></div>
+    <div class="row"><label>Page size</label><select id="np-size">${Object.keys(SIZES).map((k) => `<option>${k}</option>`).join('')}</select></div>
+    <div class="row"><label>W × H (pt)</label><input type="number" id="np-w" value="612"><input type="number" id="np-h" value="792"></div>
+    <div class="dim">You can add more figures (main, supplementary, extended data) afterwards. 1 in = 72 pt.</div>`, () => {
+    const w = parseFloat($('#np-w').value) || 612, h = parseFloat($('#np-h').value) || 792;
+    loadDoc(newDoc(w, h, $('#np-name').value.trim() || 'Figures')); status('New project — place plots with “Place plot(s)…” or draw something');
+  });
+  $('#np-size').addEventListener('change', (e) => { const v = SIZES[e.target.value]; if (v) { $('#np-w').value = v[0]; $('#np-h').value = v[1]; } });
+}
+$('#btn-new').addEventListener('click', newProject);
+$('#w-new').addEventListener('click', newProject); $('#w-open').addEventListener('click', () => $('#file-input').click()); $('#w-help').addEventListener('click', showHelp);
+$('#btn-help').addEventListener('click', showHelp);
 for (const ev of ['dragenter', 'dragover']) window.addEventListener(ev, (e) => { e.preventDefault(); stage.classList.add('drop'); });
 for (const ev of ['dragleave', 'drop']) window.addEventListener(ev, (e) => { e.preventDefault(); stage.classList.remove('drop'); });
-window.addEventListener('drop', (e) => { const f = e.dataTransfer?.files?.[0]; if (f) { if (/image\/(png|jpeg)/.test(f.type) && S.hasDoc) placeImage(f); else doOpen(f); } });
+window.addEventListener('drop', async (e) => {
+  const files = [...(e.dataTransfer?.files || [])]; if (!files.length) return;
+  const imgs = files.filter((f) => /image\/(png|jpeg)/.test(f.type)), hasAi = files.some((f) => /\.ai$/i.test(f.name)), pdfs = files.filter((f) => /\.pdf$/i.test(f.name));
+  // With a project open, dropped images and plot PDFs are PLACED (Shift = open as a new document instead). Dropping a .ai opens it.
+  if (S.hasDoc && imgs.length) { for (const f of imgs) await placeImage(f); return; }
+  if (S.hasDoc && pdfs.length && !hasAi && !e.shiftKey) return placeFiles(files);
+  const f = files.find((x) => /\.(ai|pdf)$/i.test(x.name)) || files[0]; doOpen(f);
+});
 
 function download(blob, name) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
@@ -726,12 +753,30 @@ $('#img-input').addEventListener('change', (e) => { const f = e.target.files[0];
 async function placeImage(file) {
   const href = await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(file); });
   const img = new Image(); await new Promise((r, j) => { img.onload = r; img.onerror = j; img.src = href; });
-  const P = S.doc.pages[S.page]; const k = Math.min(1, (P.w * 0.8) / img.naturalWidth, (P.h * 0.8) / img.naturalHeight);
-  const w = img.naturalWidth * k, h = img.naturalHeight * k, x = (P.w - w) / 2, y = (P.h - h) / 2;
-  S._before ??= snapshot(); addObject({ id: newId(), type: 'image', href, m: [w, 0, 0, -h, x, y + h], opacity: 1, clips: [], w: img.naturalWidth, h: img.naturalHeight });
+  const P = S.doc.pages[S.page]; const L = LY.layoutOf(S.doc); const grid = LY.gridLines(P, L);
+  const k = Math.min(1, (grid.right - grid.left) / 3 / img.naturalWidth, (P.h * 0.8) / img.naturalHeight); // at most a third of the grid width
+  const w = img.naturalWidth * k, h = img.naturalHeight * k, [x, y] = LY.nextSlot(S.doc, S.page, w, h, L);
+  S._before ??= snapshot();
+  const o = { id: newId(), type: 'image', href, m: [w, 0, 0, -h, x, y + h], opacity: 1, clips: [], w: img.naturalWidth, h: img.naturalHeight, role: 'plot', layer: S.activeLayer };
+  pageObjs().push(o); // every placed image becomes a panel, so it gets a letter and snaps like a plot
+  const id = PN.groupAsPanel(S.doc, S.page, [o.id], { name: stem(file.name), layer: o.layer }); PN.placeLabel(S.doc, S.page, id, L.labelOffset);
+  S.sel = new Set(PN.panelObjects(S.doc.pages[S.page], id).map((q) => q.id)); commit(); renderAll(); status(`Placed “${file.name}” as a panel`);
 }
-function modal(title, html) { const m = $('#modal'); m.querySelector('h3').textContent = title; m.querySelector('.body').innerHTML = html; m.hidden = false; }
-$('#modal .close').addEventListener('click', () => { $('#modal').hidden = true; });
+let modalOk = null;
+function modal(title, html, onOk = null) { const m = $('#modal'); m.querySelector('h3').textContent = title; m.querySelector('.body').innerHTML = html; modalOk = onOk; m.querySelector('.cancel').hidden = !onOk; m.querySelector('.close').textContent = onOk ? 'Create' : 'OK'; m.hidden = false; }
+$('#modal .close').addEventListener('click', () => { $('#modal').hidden = true; const f = modalOk; modalOk = null; f?.(); });
+$('#modal .cancel').addEventListener('click', () => { $('#modal').hidden = true; modalOk = null; });
+function showHelp() {
+  modal('Quick start', `<ol>
+    <li><b>Start:</b> <i>New figure project</i>, or drop an Illustrator <b>.ai</b> file in.</li>
+    <li><b>Add plots:</b> <i>Place plot(s)…</i> (select the plotsuite PDFs <u>and</u> their .json files together), or drop PDFs / images on the window. Each becomes a lettered panel on the next free grid slot.</li>
+    <li><b>Arrange:</b> drag panels (pink guides snap to neighbours), or press <i>Auto-arrange</i>. Letters follow reading order automatically.</li>
+    <li><b>Refer to panels:</b> in a text box choose <i>Insert panel reference…</i>; it shows “Fig. 2b” and updates by itself.</li>
+    <li><b>Data changed?</b> Re-run <code>panel_build.py</code>, then <i>Watch plots folder…</i> (Chrome/Edge) or press ↻ on the panel. Your callouts and position are kept.</li>
+    <li><b>Move to supplement:</b> in the panel list pick <i>→ fig…</i>. Everything renumbers; <i>Change log</i> lists what to fix in the manuscript.</li>
+    <li><b>Save:</b> Ctrl/⌘+S writes a .ai. <i>Export figures</i> writes one .ai per figure.</li></ol>
+    <p class="dim">Click a panel = whole panel. <b>Alt</b>-click = one object inside it. Hold <b>Shift</b> while dropping a PDF to open it instead of placing it. Full tutorial: <code>docs/TUTORIAL.md</code>.</p>`);
+}
 $('#btn-warn').addEventListener('click', () => modal('Import notes', '<p>These features in the original file are not fully editable here, so they may look different or be dropped when you save:</p><ul>' + (S.doc.meta.warnings || []).map((w) => `<li>${w}</li>`).join('') + '</ul>'));
 
 $('#btn-undo').addEventListener('click', undo); $('#btn-redo').addEventListener('click', redo);
@@ -750,7 +795,9 @@ function renderPanels() {
   let h = '<h4>Figure &amp; panels</h4>';
   h += `<div class="row"><label>Artboard is</label><select data-fig="kind">${Object.entries(PN.KINDS).map(([k, v]) => `<option value="${k}" ${doc.pages[S.page].fig.kind === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
     <div class="row"><label>Title</label><input type="text" data-fig="title" value="${esc(doc.pages[S.page].fig.title)}" placeholder="(optional)"></div>
-    <div class="dim" style="font-size:12px">→ <b>${esc(fi.name)}</b> · exported as “${esc(fi.file)}.ai”</div>`;
+    <div class="dim" style="font-size:12px">→ <b>${esc(fi.name)}</b> · exported as “${esc(fi.file)}.ai”</div>
+    <div class="btns"><button data-act="addfig-main">+ Main</button><button data-act="addfig-supp">+ Supplementary</button><button data-act="addfig-ed">+ Extended Data</button></div>
+    <div class="btns"><button data-act="figleft" title="Move this figure earlier — numbers shift">◀ Earlier</button><button data-act="figright">Later ▶</button><button data-act="figdel">Delete figure</button></div>`;
   h += '<div style="margin-top:8px">' + (ids.length ? ids.map((id, i) => {
     const p = doc.panels[id]; const lab = p.label || '';
     const others = figs.filter((f) => f.page !== S.page).map((f) => `<option value="${f.page}">${esc(f.name)}</option>`).join('');
@@ -766,11 +813,11 @@ function renderPanels() {
     const k = one.link;
     h += `<details open><summary>Provenance of “${esc(one.name)}”</summary><div class="dim">file: ${esc(k.src)}<br>sha256: ${esc((k.hash || '').slice(0, 12))}…${k.data?.path ? `<br>data: ${esc(k.data.path)} (${esc((k.data.sha256 || '').slice(0, 12))}…)` : ''}${k.builtAt ? `<br>built: ${esc(k.builtAt)}` : ''}</div>${k.cmd ? `<pre>${esc(k.cmd)}</pre>` : ''}${k.stats ? `<pre>${esc(k.stats)}</pre>` : ''}</details>`;
   }
-  if (S.notes.length) h += S.notes.map((n) => `<div class="warn">⚠ ${esc(n)}</div>`).join('');
+  if (S.notes.length && S.notesPage === S.page) h += S.notes.map((n) => `<div class="warn">⚠ ${esc(n)}</div>`).join(''); // notes belong to the figure they were raised on
   h += `<div class="btns"><button data-act="group" title="Ctrl+G. Select a panel plus loose objects to add the objects (callouts, arrows) to that panel">Group as panel / add to panel</button><button data-act="ungroup" title="Ctrl+Shift+G">Ungroup</button>
     <button data-act="place">Place plot(s)…</button><button data-act="watch">${S.watching ? 'Stop watching' : 'Watch plots folder…'}</button>${S.watching ? '<button data-act="check">Check now</button>' : ''}</div>
     <div class="btns"><button data-act="arrange" title="Reading order, top-aligned rows, column-snapped">Auto-arrange</button><button data-act="mapcsv">Panel map (CSV)</button><button data-act="exportfigs" title="One .ai per figure + panel map, in a zip">Export figures (.ai ×${figs.length})</button><button data-act="changelog">Change log (${S.changeLog.length})</button></div>`;
-  h += `<h4 style="margin-top:12px">Numbering</h4>
+  h += `<details data-settings ${S.settingsOpen ? 'open' : ''}><summary style="cursor:pointer;margin-top:10px;color:var(--dim)">Numbering &amp; lab layout settings</summary><h4 style="margin-top:8px">Numbering</h4>
     <div class="row"><label>Order</label><select data-set="orderMode"><option value="reading" ${st.orderMode === 'reading' ? 'selected' : ''}>Reading order (automatic)</option><option value="manual" ${st.orderMode === 'manual' ? 'selected' : ''}>Manual (▲▼)</option></select></div>
     <div class="row"><label>Letters</label><select data-set="letterCase"><option value="lower" ${st.letterCase === 'lower' ? 'selected' : ''}>a, b, c</option><option value="upper" ${st.letterCase === 'upper' ? 'selected' : ''}>A, B, C</option></select>
     <label style="width:auto"><input type="checkbox" data-set="omitSingle" ${st.omitSingle ? 'checked' : ''}> none if 1 panel</label></div>
@@ -779,16 +826,21 @@ function renderPanels() {
     <div class="row"><label>Cols</label><input type="number" data-lay="cols" value="${L.cols}" min="1" max="24"><label style="width:auto">Gutter</label><input type="number" data-lay="gutter" value="${L.gutter}" step="0.5"></div>
     <div class="row"><label>Margin</label><input type="number" data-lay="margin" value="${L.margin}" step="1"><label style="width:auto">Row gap</label><input type="number" data-lay="rowGap" value="${L.rowGap}" step="0.5"></div>
     <div class="row"><label>Letter at</label><input type="number" data-lay="lx" value="${L.labelOffset[0]}" step="0.5"><input type="number" data-lay="ly" value="${L.labelOffset[1]}" step="0.5"><span class="dim">x, y from frame corner</span></div>
-    <div class="row"><label></label><label style="width:auto"><input type="checkbox" data-aop ${S.arrangeOnPlace ? 'checked' : ''}> auto-arrange when placing / updating plots</label></div>`;
+    <div class="row"><label></label><label style="width:auto" title="Off (recommended): new plots go in the next free slot and updated plots only push their right-hand neighbours aside"><input type="checkbox" data-aop ${S.arrangeOnPlace ? 'checked' : ''}> re-flow ALL panels whenever a plot is placed or updated</label></div></details>`;
   box.innerHTML = h;
 }
 const panelEl = $('#panels');
+panelEl.addEventListener('toggle', (e) => { if (e.target.dataset?.settings !== undefined) S.settingsOpen = e.target.open; }, true);
 panelEl.addEventListener('click', async (e) => {
   const row = e.target.closest('[data-pid]'); const act = e.target.dataset.act;
   if (!act) { if (row && !e.target.closest('input,select,button')) { S.tool === 'direct' && setTool('select'); const id = row.dataset.pid; select(PN.panelObjects(S.doc.pages[S.page], id).map((o) => o.id)); } return; }
   const pid = row?.dataset.pid;
   switch (act) {
     case 'group': groupSel(); break;
+    case 'addfig-main': case 'addfig-supp': case 'addfig-ed': addFigure(act.slice(7)); break;
+    case 'figleft': moveFigure(-1); break;
+    case 'figright': moveFigure(1); break;
+    case 'figdel': deleteFigure(); break;
     case 'ungroup': ungroupSel(); break;
     case 'place': $('#plot-input').click(); break;
     case 'pupdate': S.updateTarget = pid; $('#update-input').click(); break;
@@ -832,7 +884,7 @@ function ungroupSel() {
 }
 function doArrange() {
   let plan; mutate(() => { plan = LY.arrange(S.doc, S.page, LY.layoutOf(S.doc)); });
-  S.notes = plan.warnings; renderPanels(); status(plan.warnings.length ? `Arranged with ${plan.warnings.length} warning(s)` : 'Panels arranged on the lab grid');
+  S.notes = plan.warnings; S.notesPage = S.page; renderPanels(); status(plan.warnings.length ? `Arranged with ${plan.warnings.length} warning(s)` : 'Panels arranged on the lab grid');
 }
 
 // align / distribute operate on panels (or loose objects) as units
@@ -857,22 +909,17 @@ function groupFiles(files) { // pair foo.pdf with foo.json
 }
 const readJson = async (f) => { try { return f ? JSON.parse(await f.text()) : {}; } catch { return {}; } };
 const bytesOf = async (f) => new Uint8Array(await f.arrayBuffer());
-function freeSlot() {
-  const pg = S.doc.pages[S.page]; const L = LY.layoutOf(S.doc);
-  const used = pg.objects.reduce((u, o) => { const b = objBounds(o); return b ? (u ? [Math.min(u[0], b[0]), Math.min(u[1], b[1]), Math.max(u[2], b[2]), Math.max(u[3], b[3])] : b) : u; }, null);
-  return [L.margin, used ? used[3] + 24 : L.margin + 12];
-}
 async function placeFiles(files) {
   const items = groupFiles([...files]); if (!items.length) return status('Choose one or more .pdf plot files (optionally with matching .json sidecars)');
   S._before ??= snapshot(); const notes = []; const added = [];
   for (const it of items) {
     try {
-      const r = await placePlot(S.doc, S.page, await bytesOf(it.pdf), { name: it.pdf.name, src: it.pdf.name, sidecar: await readJson(it.json), at: freeSlot(), layer: S.activeLayer });
-      added.push(r.id); notes.push(...r.warnings.map((w) => `${it.pdf.name}: ${w}`));
+      const r = await placePlot(S.doc, S.page, await bytesOf(it.pdf), { name: it.pdf.name, src: it.pdf.name, sidecar: await readJson(it.json), at: (w, h) => LY.nextSlot(S.doc, S.page, w, h), layer: S.activeLayer });
+      PN.placeLabel(S.doc, S.page, r.id, LY.layoutOf(S.doc).labelOffset); added.push(r.id); notes.push(...r.warnings.map((w) => `${it.pdf.name}: ${w}`));
     } catch (err) { console.error(err); notes.push(`${it.pdf.name}: ${err.message}`); }
   }
   if (S.arrangeOnPlace) { const plan = LY.arrange(S.doc, S.page, LY.layoutOf(S.doc)); notes.push(...plan.warnings); }
-  commit(); S.notes = notes; S.sel = new Set(added.flatMap((id) => PN.panelObjects(S.doc.pages[S.page], id).map((o) => o.id))); renderAll();
+  commit(); S.notes = notes; S.notesPage = S.page; S.sel = new Set(added.flatMap((id) => PN.panelObjects(S.doc.pages[S.page], id).map((o) => o.id))); renderAll();
   status(`Placed ${added.length} linked plot(s)`);
 }
 async function applyUpdate(id, bytes, sidecar, label = '') {
@@ -880,9 +927,15 @@ async function applyUpdate(id, bytes, sidecar, label = '') {
   const r = await refreshPlot(S.doc, id, bytes, { name: p0.link.src, sidecar });
   const notes = [...r.warnings.map((w) => `${name}: ${w}`)];
   const pi = PN.panelPage(S.doc, id);
-  if (S.arrangeOnPlace) { if (pi === S.page || true) { const plan = LY.arrange(S.doc, pi, LY.layoutOf(S.doc)); notes.push(...plan.warnings); } }
-  else if (r.overlaps.length) notes.push(`${name} now overlaps ${r.overlaps.map((o) => S.doc.panels[o].name).join(', ')} — use Auto-arrange`);
-  commit(); S.notes = notes; renderAll();
+  if (S.arrangeOnPlace) { const plan = LY.arrange(S.doc, pi, LY.layoutOf(S.doc)); notes.push(...plan.warnings); }
+  else {
+    // leave the layout alone: just make room by shifting the panels to the right of it in the same row
+    const moved = LY.pushRow(S.doc, pi, id, r.oldRight, r.widthAfter - r.widthBefore);
+    if (moved.length) notes.push(`Shifted ${moved.map((m) => S.doc.panels[m].name).join(', ')} to make room for “${name}”`);
+    const still = overlapsFor(S.doc, pi, id); if (still.length) notes.push(`${name} overlaps ${still.map((o) => S.doc.panels[o].name).join(', ')} — use Auto-arrange`);
+    const g = LY.gridLines(S.doc.pages[pi], LY.layoutOf(S.doc)); const f = PN.panelFrame(S.doc.pages[pi], id); if (f && f[2] > g.right + 0.5) notes.push(`${name} now extends past the right margin — use Auto-arrange`);
+  }
+  commit(); S.notes = notes; S.notesPage = pi; renderAll();
   status(`Updated “${name}” from ${p0.link.src}${Math.abs(r.widthAfter - r.widthBefore) > 0.5 ? ` (width ${r.widthBefore.toFixed(0)} → ${r.widthAfter.toFixed(0)} pt)` : ''}${label}`);
 }
 async function updateFromFiles(files) {
@@ -927,9 +980,13 @@ async function exportFigures() {
 }
 
 window.addEventListener('keydown', (e) => {
-  if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName)) return;
+  if (isTyping()) return;
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g') { e.preventDefault(); e.shiftKey ? ungroupSel() : groupSel(); }
 });
+
+// give keyboard focus back to the canvas after a dropdown choice, or Enter/Esc in a number/text field
+document.addEventListener('change', (e) => { if (e.target.tagName === 'SELECT') setTimeout(() => e.target.blur(), 0); });
+document.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === 'Escape') && e.target.tagName === 'INPUT' && e.target.type !== 'file') e.target.blur(); });
 
 // boot
 S._before = snapshot(); syncButtons(); setTool('select'); refreshPages(); renderAll();
