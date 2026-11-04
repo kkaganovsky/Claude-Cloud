@@ -61,6 +61,29 @@ private func pieImage(fraction: CGFloat, colour: NSColor) -> NSImage {
     return img
 }
 
+// MARK: - Day plan (received from Pomo Plan via pomo://plan?d=<date>&p=<base64url JSON>)
+
+struct PlanItem: Codable {
+    var t: String   // task title
+    var n: Int      // planned sessions
+}
+
+private func todayString() -> String {
+    let f = DateFormatter()
+    f.locale = Locale(identifier: "en_US_POSIX")
+    f.calendar = Calendar(identifier: .gregorian)
+    f.dateFormat = "yyyy-MM-dd"
+    return f.string(from: Date())
+}
+
+/// Strip control characters and cap length — the URL could come from any local app.
+private func clean(_ s: String) -> String {
+    let scalars = s.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }
+    return String(String.UnicodeScalarView(scalars))
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .prefix(100).description
+}
+
 // MARK: - App
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -71,6 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var timer: Timer?
     private var goal = ""
     private var lastIconKey = -1
+    private weak var goalField: NSTextField?
     private let defaults = UserDefaults.standard
 
     private var lastGoal: String? {
@@ -87,6 +111,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             defaults.set(Calendar.current.startOfDay(for: Date()).timeIntervalSince1970, forKey: "countDay")
             defaults.set(newValue, forKey: "count")
         }
+    }
+
+    // MARK: Plan storage
+
+    private var planItems: [PlanItem] {
+        guard defaults.string(forKey: "planDate") == todayString(),
+              let data = defaults.data(forKey: "planItems"),
+              let items = try? JSONDecoder().decode([PlanItem].self, from: data) else { return [] }
+        return items
+    }
+
+    /// Sessions completed today per goal title.
+    private var planDone: [String: Int] {
+        get {
+            guard defaults.string(forKey: "planDoneDate") == todayString() else { return [:] }
+            return defaults.dictionary(forKey: "planDone") as? [String: Int] ?? [:]
+        }
+        set {
+            defaults.set(todayString(), forKey: "planDoneDate")
+            defaults.set(newValue, forKey: "planDone")
+        }
+    }
+
+    private var nextPlanItem: PlanItem? {
+        let done = planDone
+        return planItems.first { (done[$0.t] ?? 0) < $0.n }
+    }
+
+    func applicationWillFinishLaunching(_ note: Notification) {
+        NSAppleEventManager.shared().setEventHandler(
+            self, andSelector: #selector(handleURL(_:reply:)),
+            forEventClass: AEEventClass(kInternetEventClass), andEventID: AEEventID(kAEGetURL))
+    }
+
+    @objc private func handleURL(_ event: NSAppleEventDescriptor, reply: NSAppleEventDescriptor) {
+        guard let str = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject))?.stringValue,
+              str.count < 20_000,
+              let comps = URLComponents(string: str),
+              comps.scheme == "pomo", comps.host == "plan",
+              let date = comps.queryItems?.first(where: { $0.name == "d" })?.value,
+              date == todayString(),
+              var b64 = comps.queryItems?.first(where: { $0.name == "p" })?.value else { return }
+        b64 = b64.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        while b64.count % 4 != 0 { b64 += "=" }
+        guard let data = Data(base64Encoded: b64),
+              let raw = try? JSONDecoder().decode([PlanItem].self, from: data) else { return }
+        let items = raw.prefix(30)
+            .map { PlanItem(t: clean($0.t), n: min(max($0.n, 1), 8)) }
+            .filter { !$0.t.isEmpty }
+        guard let encoded = try? JSONEncoder().encode(items) else { return }
+        defaults.set(date, forKey: "planDate")
+        defaults.set(encoded, forKey: "planItems")
     }
 
     func applicationDidFinishLaunching(_ note: Notification) {
@@ -144,6 +220,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
+        let items = planItems
+        if !items.isEmpty {
+            let header = menu.addItem(withTitle: "Today's Plan", action: nil, keyEquivalent: "")
+            header.isEnabled = false
+            let done = planDone
+            for (i, item) in items.enumerated() {
+                let d = done[item.t] ?? 0
+                let mi = add("\(i + 1). \(item.t)  \(min(d, item.n))/\(item.n) 🍅",
+                             phase == .idle ? #selector(startPlanItem(_:)) : nil)
+                mi.representedObject = item.t
+                mi.state = d >= item.n ? .on : .off
+                mi.isEnabled = phase == .idle
+            }
+        }
+        _ = add("Plan My Day…", #selector(openPlanner))
+        menu.addItem(.separator())
         let count = menu.addItem(withTitle: "Sessions today: \(sessionsToday)", action: nil, keyEquivalent: "")
         count.isEnabled = false
         let login = add("Launch at Login", #selector(toggleLogin))
@@ -154,6 +246,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: Actions
 
     @objc private func startFocusClicked() { askGoalAndStart() }
+
+    @objc private func startPlanItem(_ sender: NSMenuItem) {
+        guard let title = sender.representedObject as? String else { return }
+        goal = title
+        lastGoal = title
+        start(.focus)
+    }
+
+    @objc private func openPlanner() {
+        if let url = URL(string: "pomoplan://open"), !NSWorkspace.shared.open(url) {
+            let a = NSAlert()
+            a.messageText = "Pomo Plan isn't installed"
+            a.informativeText = "Build it from the pomo-plan folder and move it to /Applications."
+            NSApp.activate(ignoringOtherApps: true)
+            a.runModal()
+        }
+    }
+
+    @objc private func planPopupChanged(_ sender: NSPopUpButton) {
+        if let title = sender.selectedItem?.representedObject as? String {
+            goalField?.stringValue = title
+        }
+    }
     @objc private func startBreakClicked() { start(.rest) }
     @objc private func stopClicked() { stop() }
     @objc private func quit() { NSApp.terminate(nil) }
@@ -194,7 +309,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         alert.informativeText = "25 minutes of focus."
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
         field.placeholderString = "e.g. Write the methods section"
-        alert.accessoryView = field
+        goalField = field
+
+        // With a plan for today: pre-fill the next unfinished task, offer the rest in a pop-up.
+        let items = planItems
+        if !items.isEmpty {
+            let done = planDone
+            let popup = NSPopUpButton(frame: NSRect(x: -2, y: 32, width: 304, height: 26), pullsDown: false)
+            popup.addItem(withTitle: "Today's plan…")
+            for (i, item) in items.enumerated() {
+                let d = done[item.t] ?? 0
+                popup.addItem(withTitle: "\(i + 1). \(item.t)  (\(min(d, item.n))/\(item.n))")
+                popup.lastItem?.representedObject = item.t
+            }
+            popup.target = self
+            popup.action = #selector(planPopupChanged(_:))
+            if let next = nextPlanItem {
+                field.stringValue = next.t
+                if let idx = items.firstIndex(where: { $0.t == next.t }) { popup.selectItem(at: idx + 1) }
+            }
+            let box = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 58))
+            box.addSubview(popup)
+            box.addSubview(field)
+            alert.accessoryView = box
+            alert.informativeText = "25 minutes of focus. Next up from your plan is filled in."
+        } else {
+            alert.accessoryView = field
+        }
         alert.addButton(withTitle: "Start")
 
         var reuseIndex: Int? = nil
@@ -257,6 +398,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch phase {
         case .focus:
             sessionsToday += 1
+            var done = planDone
+            done[goal, default: 0] += 1
+            planDone = done
             if playSound { NSSound(named: "Glass")?.play() }
             start(.rest)
         case .rest:

@@ -2,7 +2,7 @@ name: Build Pomo.app
 on:
   push:
     branches: ["claude/ecstatic-faraday-iakcai"]
-    paths: ["pomodoro-menubar/**", ".github/workflows/pomo.yml"]
+    paths: ["pomodoro-menubar/**", "pomo-plan/**", ".github/workflows/pomo.yml"]
   workflow_dispatch:
 
 # Least privilege: the job can only read the repo; no write token, no secrets used.
@@ -18,12 +18,17 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-          sparse-checkout: pomodoro-menubar
+          sparse-checkout: |
+            pomodoro-menubar
+            pomo-plan
       - run: ./pomodoro-menubar/build.sh
+      - run: ./pomo-plan/build.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: Pomo-app
           path: |
             pomodoro-menubar/build/Pomo.zip
             pomodoro-menubar/build/Pomo.zip.sha256
+            pomo-plan/build/PomoPlan.zip
+            pomo-plan/build/PomoPlan.zip.sha256
           retention-days: 14
